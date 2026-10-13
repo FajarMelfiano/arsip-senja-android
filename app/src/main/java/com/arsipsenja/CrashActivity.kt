@@ -47,7 +47,7 @@ class CrashActivity : Activity() {
         val isi = TextView(this).apply {
             text = jejak.take(20000)
             textSize = 11f
-            isTextSelectable = true
+            setTextIsSelectable(true)
             setPadding(0, 24, 0, 24)
         }
         gulung.addView(isi)
@@ -102,8 +102,13 @@ object PenangkapCrash : Thread.UncaughtExceptionHandler {
     private var bawaan: Thread.UncaughtExceptionHandler? = null
     private var terpasang = false
 
-    fun pasang(context: Context) {
-        if (terpasang) return
+    override fun uncaughtException(utas: Thread, lemparan: Throwable) {
+        // Tidak dipakai langsung (pasang() memakai lambda), tapi wajib ada
+        // karena object ini mendeklarasikan interface-nya.
+        bawaan?.uncaughtException(utas, lemparan)
+    }
+
+    fun pasang(context: Context) {        if (terpasang) return
         terpasang = true
         val appContext = context.applicationContext
         bawaan = Thread.getDefaultUncaughtExceptionHandler()
