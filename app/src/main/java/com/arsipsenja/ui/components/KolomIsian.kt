@@ -99,9 +99,15 @@ fun KolomIsian(
                             onNext = { onKirim?.invoke() },
                             onSend = { onKirim?.invoke() },
                         ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 44.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                        // decorationBox: teks di tengah vertikal. Tanpa ini, teks
+                        // BasicTextField menempel ke atas saat min-height > tinggi baris.
+                        decorationBox = { dalam ->
+                            Box(
+                                modifier = Modifier.heightIn(min = 44.dp),
+                                contentAlignment = Alignment.CenterStart,
+                            ) { dalam() }
+                        },
                     )
                 }
                 if (trailing != null) {

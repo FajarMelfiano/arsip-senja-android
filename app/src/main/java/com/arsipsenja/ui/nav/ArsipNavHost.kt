@@ -11,6 +11,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.navigation.NavHostController
@@ -62,26 +65,30 @@ fun ArsipNavHost(
     val diLogin = ruteAktif == Rute.LOGIN
     val diBerkas = ruteAktif?.startsWith("berkas/") == true
 
-    // Pindah layar mengikuti status otorisasi Telegram.
-    LaunchedEffect(status, ruteAktif) {
-        when (status) {
-            is StatusOtorisasi.Siap -> {
-                if (ruteAktif != Rute.DASBOR) {
-                    navController.navigate(Rute.DASBOR) {
-                        popUpTo(Rute.LOGIN) { inclusive = true }
-                        launchSingleTop = true
-                    }
+    // Pindah layar HANYA saat status otorisasi BERUBAH.
+    // (Versi lama memakai LaunchedEffect(status, ruteAktif) sehingga setiap
+    // ganti tab memicu navigasi balik ke dasbor — tab tidak pernah bisa dibuka.)
+    var statusLalu by remember { mutableStateOf<StatusOtorisasi?>(null) }
+    LaunchedEffect(status) {
+        val lalu = statusLalu
+        statusLalu = status
+        // Bandingkan kelas (bukan equals): hitung mundur OTP memakai data class
+        // yang nilainya berubah tiap detik — itu bukan "perubahan" navigasi.
+        if (lalu != null && lalu::class == status::class) return@LaunchedEffect
+        val ruteKini = navController.currentBackStackEntry?.destination?.route
+        when {
+            status is StatusOtorisasi.Siap && ruteKini == Rute.LOGIN -> {
+                navController.navigate(Rute.DASBOR) {
+                    popUpTo(Rute.LOGIN) { inclusive = true }
+                    launchSingleTop = true
                 }
             }
-            is StatusOtorisasi.Keluar -> {
-                if (ruteAktif != Rute.LOGIN) {
-                    navController.navigate(Rute.LOGIN) {
-                        popUpTo(Rute.DASBOR) { inclusive = true }
-                        launchSingleTop = true
-                    }
+            status is StatusOtorisasi.Keluar && ruteKini != Rute.LOGIN -> {
+                navController.navigate(Rute.LOGIN) {
+                    popUpTo(navController.graph.startDestinationId) { inclusive = true }
+                    launchSingleTop = true
                 }
             }
-            else -> Unit
         }
     }
 

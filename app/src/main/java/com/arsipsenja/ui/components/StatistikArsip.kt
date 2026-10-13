@@ -74,7 +74,9 @@ fun StatistikArsip(
         Spacer(Modifier.width(10.dp))
         KolomStatistik(
             label = "Kapasitas",
-            nilai = "Tak terbatas",
+            // "Tak terbatas" kepotong jadi "Tak" di kartu 1/3 lebar — simbol ∞
+            // (ikonnya juga infinity) muat dan terbaca dengan labelnya.
+            nilai = "∞",
             ikon = ArsipIcons.Infinity,
             warna = WarnaArsip.Sukses,
             modifier = Modifier.weight(1f),

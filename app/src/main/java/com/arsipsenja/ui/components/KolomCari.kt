@@ -81,9 +81,15 @@ fun KolomCari(
                     cursorBrush = SolidColor(WarnaArsip.Amber),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = { onCari?.invoke() }),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 40.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                    // decorationBox: teks di tengah vertikal. Tanpa ini, teks
+                    // BasicTextField menempel ke atas saat min-height > tinggi baris.
+                    decorationBox = { dalam ->
+                        Box(
+                            modifier = Modifier.heightIn(min = 40.dp),
+                            contentAlignment = Alignment.CenterStart,
+                        ) { dalam() }
+                    },
                 )
             }
             if (nilai.isNotEmpty()) {
