@@ -1,9 +1,20 @@
 package com.arsipsenja.data.local
 
 import androidx.sqlite.db.SimpleSQLiteQuery
+import androidx.sqlite.db.SupportSQLiteQuery
 import com.arsipsenja.util.ArahUrut
 import com.arsipsenja.util.TipeFile
 import com.arsipsenja.util.UrutBerkas
+
+/** Hasil rakitan kueri: SQL parameterisasi + daftar argumennya. */
+data class KueriDibangun(
+    val sql: String,
+    val arguments: List<Any?>,
+) {
+    /** Bungkus menjadi query yang dimengerti Room. */
+    fun keSupportQuery(): SupportSQLiteQuery =
+        SimpleSQLiteQuery(sql, arguments.toTypedArray())
+}
 
 /**
  * Kueri daftar berkas dasbor: pencarian as-you-type, filter tipe/koleksi, urutan.
@@ -16,7 +27,7 @@ data class KueriTampilan(
     val urut: UrutBerkas = UrutBerkas.TANGGAL,
     val arah: ArahUrut = ArahUrut.TURUN,
 ) {
-    fun bangun(): SimpleSQLiteQuery {
+    fun bangun(): KueriDibangun {
         val klausa = mutableListOf<String>()
         val argumen = mutableListOf<Any>()
 
@@ -44,6 +55,6 @@ data class KueriTampilan(
         val where = if (klausa.isEmpty()) "" else "WHERE " + klausa.joinToString(" AND ")
         val sql = "SELECT * FROM berkas_arsip $where " +
             "ORDER BY $kolomUrut $arahUrut, nomorKatalog DESC"
-        return SimpleSQLiteQuery(sql, argumen.toTypedArray())
+        return KueriDibangun(sql, argumen)
     }
 }

@@ -43,7 +43,7 @@ class ArsipRepository(
     // ---- Aliran data ----
 
     fun alirBerkas(kueri: KueriTampilan): Flow<List<BerkasArsipEntity>> =
-        berkasDao.alirDaftar(kueri.bangun())
+        berkasDao.alirDaftar(kueri.bangun().keSupportQuery())
 
     fun alirStatistik(): Flow<StatistikBerkas> = berkasDao.alirStatistik()
 
