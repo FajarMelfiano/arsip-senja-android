@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Palet Arsip Senja — indigo-hitam, amber lentera, ungu senja, tinta hangat. -->
+    <color name="kanvas">#0E0C1A</color>
+    <color name="kanvas_dalam">#0A0814</color>
+    <color name="veil">#141126</color>
+    <color name="permukaan">#16132C</color>
+    <color name="amber">#E8A33D</color>
+    <color name="violet">#7C5CBF</color>
+    <color name="tinta">#F2ECDF</color>
+    <color name="tinta_2">#A89FB8</color>
+    <color name="latar_ikon">#0E0C1A</color>
+</resources>

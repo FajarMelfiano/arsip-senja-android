@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="nama_aplikasi">Arsip Senja</string>
+    <string name="tagline">Arsip pribadi di atas Telegram — tanpa server, tanpa biaya penyimpanan.</string>
+
+    <string name="nav_dasbor">Dasbor</string>
+    <string name="nav_unggah">Unggah</string>
+    <string name="nav_tautan">Tautan</string>
+    <string name="nav_pengaturan">Pengaturan</string>
+
+    <string name="aksi_kembali">Kembali</string>
+    <string name="aksi_tutup">Tutup</string>
+    <string name="aksi_batal">Batal</string>
+    <string name="aksi_simpan">Simpan</string>
+    <string name="aksi_hapus">Hapus</string>
+    <string name="aksi_salin">Salin</string>
+    <string name="aksi_unduh">Unduh</string>
+    <string name="aksi_buka">Buka</string>
+    <string name="aksi_coba_lagi">Coba lagi</string>
+    <string name="aksi_muat_ulang">Muat ulang</string>
+    <string name="aksi_pilih_berkas">Pilih berkas</string>
+
+    <string name="notif_channel_unggah">Unggahan berkas</string>
+    <string name="notif_channel_unduh">Unduhan berkas</string>
+    <string name="notif_channel_sync">Sinkronisasi arsip</string>
+    <string name="notif_sync_jalan">Menyinkronkan arsip…</string>
+
+    <string name="label_biometrik">Kunci biometrik</string>
+    <string name="deskripsi_biometrik">Minta sidik jari/wajah setiap kali Arsip Senja dibuka.</string>
+    <string name="judul_prompt_biometrik">Buka Arsip Senja</string>
+    <string name="deskripsi_prompt_biometrik">Verifikasi identitas untuk melanjutkan ke arsip pribadimu.</string>
+    <string name="biometrik_batal">Verifikasi biometrik dibatalkan.</string>
+
+    <string name="format_katalog">No. %1$d</string>
+</resources>

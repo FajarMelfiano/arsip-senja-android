@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <files-path
+        name="unduhan_arsip"
+        path="unduhan/" />
+    <cache-path
+        name="cache_unggahan"
+        path="unggahan/" />
+    <external-files-path
+        name="berkas_eksternal"
+        path="." />
+</paths>
