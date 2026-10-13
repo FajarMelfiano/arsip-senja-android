@@ -1,7 +1,6 @@
 package com.arsipsenja.data.local
 
 import androidx.sqlite.db.SimpleSQLiteQuery
-import androidx.sqlite.db.SupportSQLiteQuery
 import com.arsipsenja.util.ArahUrut
 import com.arsipsenja.util.TipeFile
 import com.arsipsenja.util.UrutBerkas
@@ -17,7 +16,7 @@ data class KueriTampilan(
     val urut: UrutBerkas = UrutBerkas.TANGGAL,
     val arah: ArahUrut = ArahUrut.TURUN,
 ) {
-    fun bangun(): SupportSQLiteQuery {
+    fun bangun(): SimpleSQLiteQuery {
         val klausa = mutableListOf<String>()
         val argumen = mutableListOf<Any>()
 
