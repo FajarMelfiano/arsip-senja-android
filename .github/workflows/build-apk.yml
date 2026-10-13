@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: build-apk-${{ github.ref }}
@@ -54,6 +54,22 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Upload APK ke Release (rolling)
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="debug-terbaru"
+          APK=$(ls app/build/outputs/apk/debug/*.apk | head -n 1)
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --prerelease \
+              --title "APK Debug Terbaru (rolling)" \
+              --notes "Rilis rolling: selalu berisi APK debug terbaru hasil CI."
+          fi
+          gh release upload "$TAG" "$APK" --clobber
+          gh release edit "$TAG" --prerelease \
+            --notes "Build #${{ github.run_number }} — commit ${{ github.sha }} — $(date -u '+%Y-%m-%d %H:%M UTC')"
 
       - name: Upload laporan test
         if: always()
