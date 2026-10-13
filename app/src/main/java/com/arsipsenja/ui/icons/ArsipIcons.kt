@@ -1,7 +1,7 @@
 package com.arsipsenja.ui.icons
 
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.vector.PathNode
 import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
@@ -17,16 +17,19 @@ import androidx.compose.ui.unit.dp
 object ArsipIcons {
 
     /**
-     * Pembungkus Path yang menerima literal angka bulat (generator ikon
-     * mengeluarkan koordinat Int; Path asli hanya menerima Float).
+     * Pembungkus yang menerima literal angka bulat (generator ikon
+     * mengeluarkan koordinat Int; PathNode hanya menerima Float) dan
+     * mengakumulasikannya sebagai daftar PathNode untuk addPath.
      */
-    private class JalurAngka(val path: Path) {
+    private class JalurAngka {
+        val nodes = mutableListOf<PathNode>()
+
         fun moveTo(x: Number, y: Number) {
-            path.moveTo(x.toFloat(), y.toFloat())
+            nodes += PathNode.MoveTo(x.toFloat(), y.toFloat())
         }
 
         fun lineTo(x: Number, y: Number) {
-            path.lineTo(x.toFloat(), y.toFloat())
+            nodes += PathNode.LineTo(x.toFloat(), y.toFloat())
         }
 
         fun cubicTo(
@@ -37,7 +40,7 @@ object ArsipIcons {
             x3: Number,
             y3: Number,
         ) {
-            path.cubicTo(
+            nodes += PathNode.CurveTo(
                 x1.toFloat(), y1.toFloat(),
                 x2.toFloat(), y2.toFloat(),
                 x3.toFloat(), y3.toFloat(),
@@ -45,7 +48,7 @@ object ArsipIcons {
         }
 
         fun close() {
-            path.close()
+            nodes += PathNode.Close
         }
     }
 
@@ -1158,7 +1161,7 @@ object ArsipIcons {
             viewportWidth = 24f,
             viewportHeight = 24f,
         ).addPath(
-            path = JalurAngka(Path()).apply(block).path,
+            pathData = JalurAngka().apply(block).nodes,
             fill = null,
             stroke = SolidColor(Color(0xFFFFFFFF)),
             strokeLineWidth = 2f,
