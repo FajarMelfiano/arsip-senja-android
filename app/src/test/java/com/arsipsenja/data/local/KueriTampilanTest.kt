@@ -20,7 +20,7 @@ class KueriTampilanTest {
     fun `kata kunci diturunkan ke lower like parameterisasi`() {
         val q = KueriTampilan(kata = "  Foto Senja ").bangun()
         assertThat(q.sql).startsWith("SELECT * FROM berkas_arsip WHERE LOWER(nama) LIKE ?")
-        assertThat(q.arguments).asList().containsExactly("%foto senja%")
+        assertThat(q.arguments).containsExactly("%foto senja%")
     }
 
     @Test
@@ -35,7 +35,7 @@ class KueriTampilanTest {
             "SELECT * FROM berkas_arsip WHERE tipe = ? AND koleksiId = ? " +
                 "ORDER BY ukuran ASC, nomorKatalog DESC",
         )
-        assertThat(q.arguments).asList().containsExactly("VIDEO", -100123L).inOrder()
+        assertThat(q.arguments).containsExactly("VIDEO", -100123L).inOrder()
     }
 
     @Test
