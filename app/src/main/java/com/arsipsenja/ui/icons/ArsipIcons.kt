@@ -16,6 +16,39 @@ import androidx.compose.ui.unit.dp
  */
 object ArsipIcons {
 
+    /**
+     * Pembungkus Path yang menerima literal angka bulat (generator ikon
+     * mengeluarkan koordinat Int; Path asli hanya menerima Float).
+     */
+    private class JalurAngka(val path: Path) {
+        fun moveTo(x: Number, y: Number) {
+            path.moveTo(x.toFloat(), y.toFloat())
+        }
+
+        fun lineTo(x: Number, y: Number) {
+            path.lineTo(x.toFloat(), y.toFloat())
+        }
+
+        fun cubicTo(
+            x1: Number,
+            y1: Number,
+            x2: Number,
+            y2: Number,
+            x3: Number,
+            y3: Number,
+        ) {
+            path.cubicTo(
+                x1.toFloat(), y1.toFloat(),
+                x2.toFloat(), y2.toFloat(),
+                x3.toFloat(), y3.toFloat(),
+            )
+        }
+
+        fun close() {
+            path.close()
+        }
+    }
+
     val ArrowLeft: ImageVector by lazy {
         arsipIcon("arrow-left") {
             moveTo(12, 19)
@@ -1117,7 +1150,7 @@ object ArsipIcons {
         }
     }
 
-    private fun arsipIcon(name: String, block: Path.() -> Unit): ImageVector =
+    private fun arsipIcon(name: String, block: JalurAngka.() -> Unit): ImageVector =
         ImageVector.Builder(
             name = name,
             defaultWidth = 24.dp,
@@ -1125,7 +1158,7 @@ object ArsipIcons {
             viewportWidth = 24f,
             viewportHeight = 24f,
         ).addPath(
-            path = Path().apply(block),
+            path = JalurAngka(Path()).apply(block).path,
             fill = null,
             stroke = SolidColor(Color(0xFFFFFFFF)),
             strokeLineWidth = 2f,

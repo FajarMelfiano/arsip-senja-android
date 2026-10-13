@@ -4,10 +4,10 @@ package com.arsipsenja.ui.theme
 
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.ExperimentalTextApi
-import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.googlefonts.GoogleFont
+import androidx.compose.ui.text.googlefonts.Font as FontGoogle
 import androidx.compose.ui.unit.sp
 import com.arsipsenja.R
 
@@ -23,18 +23,18 @@ private val penyediaGoogleFonts = GoogleFont.Provider(
 
 /** Fraunces — display/angka, memberi kesan buku katalog lama. */
 val Fraunces: FontFamily = FontFamily(
-    Font(GoogleFont("Fraunces"), penyediaGoogleFonts, FontWeight.Normal),
-    Font(GoogleFont("Fraunces"), penyediaGoogleFonts, FontWeight.Medium),
-    Font(GoogleFont("Fraunces"), penyediaGoogleFonts, FontWeight.SemiBold),
-    Font(GoogleFont("Fraunces"), penyediaGoogleFonts, FontWeight.Bold),
+    FontGoogle(GoogleFont("Fraunces"), penyediaGoogleFonts, FontWeight.Normal),
+    FontGoogle(GoogleFont("Fraunces"), penyediaGoogleFonts, FontWeight.Medium),
+    FontGoogle(GoogleFont("Fraunces"), penyediaGoogleFonts, FontWeight.SemiBold),
+    FontGoogle(GoogleFont("Fraunces"), penyediaGoogleFonts, FontWeight.Bold),
 )
 
 /** Plus Jakarta Sans — teks isi, jernih di ukuran kecil. */
 val JakartaSans: FontFamily = FontFamily(
-    Font(GoogleFont("Plus Jakarta Sans"), penyediaGoogleFonts, FontWeight.Normal),
-    Font(GoogleFont("Plus Jakarta Sans"), penyediaGoogleFonts, FontWeight.Medium),
-    Font(GoogleFont("Plus Jakarta Sans"), penyediaGoogleFonts, FontWeight.SemiBold),
-    Font(GoogleFont("Plus Jakarta Sans"), penyediaGoogleFonts, FontWeight.Bold),
+    FontGoogle(GoogleFont("Plus Jakarta Sans"), penyediaGoogleFonts, FontWeight.Normal),
+    FontGoogle(GoogleFont("Plus Jakarta Sans"), penyediaGoogleFonts, FontWeight.Medium),
+    FontGoogle(GoogleFont("Plus Jakarta Sans"), penyediaGoogleFonts, FontWeight.SemiBold),
+    FontGoogle(GoogleFont("Plus Jakarta Sans"), penyediaGoogleFonts, FontWeight.Bold),
 )
 
 /** Skala tipografi Arsip Senja: Fraunces untuk display/judul besar, Jakarta untuk sisanya. */

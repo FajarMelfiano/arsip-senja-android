@@ -1,24 +1,25 @@
 package com.arsipsenja.ui.nav
 
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.navigation.NavHostController
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import androidx.navigation.hasRoute
-import androidx.navigation.toRoute
+import androidx.navigation.navArgument
 import com.arsipsenja.data.telegram.StatusOtorisasi
 import com.arsipsenja.ui.icons.ArsipIcons
 import com.arsipsenja.ui.screens.BerkasScreen
@@ -29,13 +30,24 @@ import com.arsipsenja.ui.screens.TautanScreen
 import com.arsipsenja.ui.screens.UnggahScreen
 import com.arsipsenja.ui.theme.WarnaArsip
 import com.arsipsenja.ui.viewmodel.LocalKontainer
-import androidx.compose.runtime.collectAsState
+
+/** Rute string (API navigasi klasik — stabil di semua versi navigation 2.x). */
+private object Rute {
+    const val LOGIN = "login"
+    const val DASBOR = "dasbor"
+    const val UNGGAH = "unggah"
+    const val TAUTAN = "tautan"
+    const val PENGATURAN = "pengaturan"
+    const val BERKAS = "berkas/{berkasId}"
+
+    fun berkas(berkasId: String) = "berkas/$berkasId"
+}
 
 /** Satu item bilah navigasi bawah. */
-private data class ItemBawah(val label: String, val ikon: ImageVector, val buat: () -> Any)
+private data class ItemBawah(val label: String, val ikon: ImageVector, val rute: String)
 
 /**
- * Rangka navigasi utama: NavHost type-safe + bilah navigasi bawah
+ * Rangka navigasi utama: NavHost + bilah navigasi bawah
  * (tampil hanya di layar tingkat atas, hilang di login & detail berkas).
  */
 @Composable
@@ -46,25 +58,25 @@ fun ArsipNavHost(
     val status by wadah.telegramClient.status.collectAsState()
 
     val entri by navController.currentBackStackEntryAsState()
-    val tujuan = entri?.destination
-    val diLogin = tujuan?.hasRoute<RuteLogin>() == true
-    val diBerkas = tujuan?.hasRoute<RuteBerkas>() == true
+    val ruteAktif = entri?.destination?.route
+    val diLogin = ruteAktif == Rute.LOGIN
+    val diBerkas = ruteAktif?.startsWith("berkas/") == true
 
     // Pindah layar mengikuti status otorisasi Telegram.
-    LaunchedEffect(status, tujuan) {
+    LaunchedEffect(status, ruteAktif) {
         when (status) {
             is StatusOtorisasi.Siap -> {
-                if (tujuan?.hasRoute<RuteDasbor>() != true) {
-                    navController.navigate(RuteDasbor) {
-                        popUpTo(RuteLogin) { inclusive = true }
+                if (ruteAktif != Rute.DASBOR) {
+                    navController.navigate(Rute.DASBOR) {
+                        popUpTo(Rute.LOGIN) { inclusive = true }
                         launchSingleTop = true
                     }
                 }
             }
             is StatusOtorisasi.Keluar -> {
-                if (tujuan?.hasRoute<RuteLogin>() != true) {
-                    navController.navigate(RuteLogin) {
-                        popUpTo(RuteDasbor) { inclusive = true }
+                if (ruteAktif != Rute.LOGIN) {
+                    navController.navigate(Rute.LOGIN) {
+                        popUpTo(Rute.DASBOR) { inclusive = true }
                         launchSingleTop = true
                     }
                 }
@@ -74,30 +86,23 @@ fun ArsipNavHost(
     }
 
     val itemBawah = listOf(
-        ItemBawah("Dasbor", ArsipIcons.LayoutGrid) { RuteDasbor },
-        ItemBawah("Unggah", ArsipIcons.Upload) { RuteUnggah },
-        ItemBawah("Tautan", ArsipIcons.Link) { RuteTautan },
-        ItemBawah("Pengaturan", ArsipIcons.Settings) { RutePengaturan },
+        ItemBawah("Dasbor", ArsipIcons.LayoutGrid, Rute.DASBOR),
+        ItemBawah("Unggah", ArsipIcons.Upload, Rute.UNGGAH),
+        ItemBawah("Tautan", ArsipIcons.Link, Rute.TAUTAN),
+        ItemBawah("Pengaturan", ArsipIcons.Settings, Rute.PENGATURAN),
     )
 
     Scaffold(
-        containerColor = com.arsipsenja.ui.theme.WarnaArsip.Kanvas,
+        containerColor = WarnaArsip.Kanvas,
         bottomBar = {
             if (!diLogin && !diBerkas) {
                 NavigationBar(containerColor = WarnaArsip.Veil) {
                     itemBawah.forEach { item ->
-                        val rute = item.buat()
-                        val terpilih = when (rute) {
-                            is RuteDasbor -> tujuan?.hasRoute<RuteDasbor>() == true
-                            is RuteUnggah -> tujuan?.hasRoute<RuteUnggah>() == true
-                            is RuteTautan -> tujuan?.hasRoute<RuteTautan>() == true
-                            else -> tujuan?.hasRoute<RutePengaturan>() == true
-                        }
                         NavigationBarItem(
-                            selected = terpilih,
+                            selected = ruteAktif == item.rute,
                             onClick = {
-                                navController.navigate(rute) {
-                                    popUpTo(RuteDasbor) { saveState = true }
+                                navController.navigate(item.rute) {
+                                    popUpTo(Rute.DASBOR) { saveState = true }
                                     launchSingleTop = true
                                     restoreState = true
                                 }
@@ -124,23 +129,25 @@ fun ArsipNavHost(
     ) { padding ->
         NavHost(
             navController = navController,
-            startDestination = RuteLogin,
+            startDestination = Rute.LOGIN,
             modifier = Modifier.padding(padding),
-            containerColor = WarnaArsip.Kanvas,
         ) {
-            composable<RuteLogin> { LoginScreen() }
-            composable<RuteDasbor> {
+            composable(Rute.LOGIN) { LoginScreen() }
+            composable(Rute.DASBOR) {
                 DasborScreen(
-                    onBukaBerkas = { id -> navController.navigate(RuteBerkas(id)) },
+                    onBukaBerkas = { id -> navController.navigate(Rute.berkas(id)) },
                 )
             }
-            composable<RuteUnggah> { UnggahScreen() }
-            composable<RuteTautan> { TautanScreen() }
-            composable<RutePengaturan> { PengaturanScreen() }
-            composable<RuteBerkas> { daftar ->
-                val rute = daftar.toRoute<RuteBerkas>()
+            composable(Rute.UNGGAH) { UnggahScreen() }
+            composable(Rute.TAUTAN) { TautanScreen() }
+            composable(Rute.PENGATURAN) { PengaturanScreen() }
+            composable(
+                route = Rute.BERKAS,
+                arguments = listOf(navArgument("berkasId") { type = NavType.StringType }),
+            ) { daftar ->
+                val berkasId = daftar.arguments?.getString("berkasId").orEmpty()
                 BerkasScreen(
-                    berkasId = rute.berkasId,
+                    berkasId = berkasId,
                     onKembali = { navController.popBackStack() },
                 )
             }

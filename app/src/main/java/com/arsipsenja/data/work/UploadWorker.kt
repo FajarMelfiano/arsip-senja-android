@@ -123,18 +123,20 @@ class UploadWorker(
         Notifikasi.tampilkanUnggah(applicationContext, nama, 99, selesai = false)
     }
 
-    private fun salinKeCache(uri: Uri, nama: String): File? = try {
-        val dir = File(applicationContext.cacheDir, "unggahan").apply { mkdirs() }
-        val keluar = File(dir, "${System.currentTimeMillis()}_$nama")
-        applicationContext.contentResolver.openInputStream(uri)?.use { masuk ->
-            FileOutputStream(keluar).use { output ->
-                masuk.copyTo(output)
-            }
-        } ?: return null
-        keluar
-    } catch (e: Exception) {
-        Log.e(tag, "Salin berkas $nama gagal", e)
-        null
+    private fun salinKeCache(uri: Uri, nama: String): File? {
+        return try {
+            val dir = File(applicationContext.cacheDir, "unggahan").apply { mkdirs() }
+            val keluar = File(dir, "${System.currentTimeMillis()}_$nama")
+            applicationContext.contentResolver.openInputStream(uri)?.use { masuk ->
+                FileOutputStream(keluar).use { output ->
+                    masuk.copyTo(output)
+                }
+            } ?: return null
+            keluar
+        } catch (e: Exception) {
+            Log.e(tag, "Salin berkas $nama gagal", e)
+            null
+        }
     }
 
     /**

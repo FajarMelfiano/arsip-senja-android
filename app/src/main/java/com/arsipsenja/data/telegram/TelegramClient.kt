@@ -282,7 +282,7 @@ class TelegramClient(
                 fn,
                 { obj ->
                     when {
-                        obj is TdApi.Error -> kontinu.resumeWithException(TelegramException(obj))
+                        obj is TdApi.Error -> kontinu.resumeWith(Result.failure(TelegramException(obj)))
                         !kontinu.isActive -> Unit
                         else -> {
                             @Suppress("UNCHECKED_CAST")
@@ -290,7 +290,7 @@ class TelegramClient(
                         }
                     }
                 },
-                { e -> kontinu.resumeWithException(e) },
+                { e -> kontinu.resumeWith(Result.failure(e)) },
             )
         }
     }
@@ -365,9 +365,14 @@ class TelegramClient(
                 limit = 100
             },
         )
-        return daftar.chatIds
+        return daftar.chatIds.toList()
             .mapNotNull { id ->
-                runCatching { kirim(TdApi.GetChat().apply { chatId = id }) }.getOrNull()
+                try {
+                    kirim(TdApi.GetChat().apply { chatId = id })
+                } catch (e: Exception) {
+                    Log.w(tag, "Gagal memuat chat $id", e)
+                    null
+                }
             }
             .filter { it.type is TdApi.ChatTypeSupergroup }
     }
@@ -413,7 +418,7 @@ class TelegramClient(
                 onlyLocal = false
             },
         )
-        return hasil.messages.orEmpty()
+        return hasil.messages?.toList().orEmpty()
     }
 
     // ---------------------------------------------------------------------
@@ -430,12 +435,15 @@ class TelegramClient(
         tipe: TipeFile,
         caption: String,
     ): TdApi.Message {
+        // Nama lokal agar tidak tertutup (shadow) oleh field `caption`
+        // milik TdApi di dalam blok apply di bawah.
+        val teks = caption
         val isi = when (tipe) {
             TipeFile.GAMBAR -> TdApi.InputMessagePhoto().apply {
                 photo = TdApi.InputFileLocal().apply { this.path = path }
                 width = 0
                 height = 0
-                this.caption = teksCaption(caption)
+                this.caption = teksCaption(teks)
             }
             TipeFile.VIDEO -> TdApi.InputMessageVideo().apply {
                 video = TdApi.InputFileLocal().apply { this.path = path }
@@ -443,18 +451,18 @@ class TelegramClient(
                 width = 0
                 height = 0
                 supportsStreaming = true
-                this.caption = teksCaption(caption)
+                this.caption = teksCaption(teks)
             }
             TipeFile.AUDIO -> TdApi.InputMessageAudio().apply {
                 audio = TdApi.InputFileLocal().apply { this.path = path }
                 duration = 0
-                title = caption
+                title = teks
                 performer = null
-                this.caption = teksCaption(caption)
+                this.caption = teksCaption(teks)
             }
             else -> TdApi.InputMessageDocument().apply {
                 document = TdApi.InputFileLocal().apply { this.path = path }
-                caption = teksCaption(caption)
+                this.caption = teksCaption(teks)
             }
         }
         return kirim(

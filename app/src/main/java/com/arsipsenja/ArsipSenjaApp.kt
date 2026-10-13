@@ -14,7 +14,7 @@ import com.arsipsenja.data.work.Notifikasi
 /**
  * Kontainer dependensi manual (tanpa Hilt) — satu instance per proses.
  */
-class AppContainer(context: Context) : Configuration.Provider {
+class AppContainer(context: Context) {
 
     private val appContext = context.applicationContext
 
@@ -38,11 +38,6 @@ class AppContainer(context: Context) : Configuration.Provider {
     val workManager: WorkManager
         get() = WorkManager.getInstance(appContext)
 
-    override fun getWorkManagerConfiguration(): Configuration =
-        Configuration.Builder()
-            .setMinimumLoggingLevel(android.util.Log.INFO)
-            .build()
-
     fun mulaiSesi() {
         Notifikasi.siapkan(appContext)
         telegramClient.mulai()
@@ -52,10 +47,15 @@ class AppContainer(context: Context) : Configuration.Provider {
 /**
  * Kelas aplikasi: memegang [AppContainer] dan menyiapkan kanal notifikasi.
  */
-class ArsipSenjaApp : Application() {
+class ArsipSenjaApp : Application(), Configuration.Provider {
 
     lateinit var wadah: AppContainer
         private set
+
+    override val workManagerConfiguration: Configuration
+        get() = Configuration.Builder()
+            .setMinimumLoggingLevel(android.util.Log.INFO)
+            .build()
 
     override fun onCreate() {
         super.onCreate()

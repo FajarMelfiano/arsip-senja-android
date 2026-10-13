@@ -137,7 +137,7 @@ private fun mintaBiometrik(
             override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
                 super.onAuthenticationError(errorCode, errString)
                 when (errorCode) {
-                    BiometricPrompt.ERROR_NO_BIOMETRIC,
+                    BiometricPrompt.ERROR_NO_BIOMETRICS,
                     BiometricPrompt.ERROR_NO_DEVICE_CREDENTIAL,
                     BiometricPrompt.ERROR_HW_UNAVAILABLE,
                     BiometricPrompt.ERROR_VENDOR,
