@@ -14,12 +14,24 @@ android {
         applicationId = "com.arsipsenja"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
+        // Nomor build CI dipakai sebagai versionCode agar APK tiap build
+        // bisa dipasang menimpa versi sebelumnya.
+        versionCode = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
+        }
+    }
+
+    // Satu APK per ABI + satu APK universal (semua ABI).
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+            isUniversalApk = true
         }
     }
 

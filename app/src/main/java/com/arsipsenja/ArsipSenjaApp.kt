@@ -59,9 +59,15 @@ class ArsipSenjaApp : Application(), Configuration.Provider {
 
     override fun onCreate() {
         super.onCreate()
+        PenangkapCrash.pasang(this)
         instance = this
         wadah = AppContainer(this)
-        wadah.mulaiSesi()
+        try {
+            wadah.mulaiSesi()
+        } catch (e: Exception) {
+            // Satu subsistem gagal tidak boleh membunuh seluruh aplikasi.
+            android.util.Log.e("ArsipSenjaApp", "mulaiSesi gagal", e)
+        }
     }
 
     companion object {
