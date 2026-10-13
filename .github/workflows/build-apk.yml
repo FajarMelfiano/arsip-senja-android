@@ -33,11 +33,11 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
 
-      - name: Pastikan platform android-34 tersedia
+      - name: Pastikan platform android-36 tersedia
         shell: bash
         run: |
-          if [ ! -d "$ANDROID_HOME/platforms/android-34" ]; then
-            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-34" "build-tools;34.0.0"
+          if [ ! -d "$ANDROID_HOME/platforms/android-36" ]; then
+            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0"
           fi
           ls "$ANDROID_HOME/platforms"
 
