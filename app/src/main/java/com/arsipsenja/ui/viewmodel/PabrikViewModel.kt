@@ -1,6 +1,7 @@
 package com.arsipsenja.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
 import androidx.lifecycle.viewmodel.CreationExtras
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -19,7 +20,13 @@ fun kontainerDari(extras: CreationExtras): AppContainer =
 /**
  * Pabrik ViewModel berbasis kontainer: `viewModel(factory = X.Pabrik)`.
  * Satu blok menerima [AppContainer] lalu mengembalikan ViewModel yang benar.
+ *
+ * WAJIB inline+reified: tanpa itu `initializer` meng-infer T = ViewModel
+ * (kelas induk) sehingga factory tidak dikenali untuk kelas konkret
+ * (mis. LoginViewModel) dan aplikasi crash "No initializer set for given class".
  */
-fun pabrikKontainer(blok: (AppContainer) -> ViewModel) = viewModelFactory {
-    initializer { blok(kontainerDari(this)) }
+inline fun <reified VM : ViewModel> pabrikKontainer(
+    crossinline blok: (AppContainer) -> VM,
+): ViewModelProvider.Factory = viewModelFactory {
+    initializer<VM> { blok(kontainerDari(this)) }
 }
