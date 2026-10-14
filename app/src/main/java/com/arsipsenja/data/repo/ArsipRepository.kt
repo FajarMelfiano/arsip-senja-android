@@ -92,9 +92,27 @@ class ArsipRepository(
         val forumSiap: Boolean,
     )
 
-    /** Daftar supergroup (bukan channel); tiap grup dites dukung forum atau tidak. */
+    /**
+     * Daftar supergroup (bukan channel) milik sendiri; tiap grup dites
+     * dukung forum atau tidak.
+     *
+     * Gabungkan dua sumber seperti deteksi otomatis: GetChats (100 chat
+     * teratas) + SearchChats nama vault bawaan — grup lama yang sudah lama
+     * tidak aktif tidak masuk 100 teratas GetChats, tetapi SearchChats
+     * menjangkau seluruh daftar chat. Hasil SearchChats disaring
+     * kepemilikannya juga (fail-closed) agar grup orang lain tidak muncul.
+     */
     suspend fun daftarKandidatVault(): List<KandidatVault> {
-        val grup = telegram.daftarSupergroup()
+        val dariPencarian = runCatching { telegram.cariChat(NAMA_VAULT_BAWAAN) }
+            .onFailure { Log.i(tag, "SearchChats gagal, lanjut dari GetChats: ${it.message}") }
+            .getOrDefault(emptyList())
+            // Hasil SearchChats juga wajib milik sendiri (fail-closed):
+            // tanpa saringan ini grup orang lain bisa teradopsi otomatis.
+            .filter { chat ->
+                runCatching { telegram.apakahPemilik(chat.id) }.getOrDefault(false)
+            }
+        val grup = (telegram.daftarSupergroup() + dariPencarian)
+            .distinctBy { it.id }
         return grup.map { chat ->
             val siap = try {
                 telegram.daftarTopik(chat.id)
@@ -223,6 +241,11 @@ class ArsipRepository(
         val dariPencarian = runCatching { telegram.cariChat(NAMA_VAULT_BAWAAN) }
             .onFailure { Log.i(tag, "SearchChats gagal, lanjut dari GetChats: ${it.message}") }
             .getOrDefault(emptyList())
+            // Hasil SearchChats juga wajib milik sendiri (fail-closed):
+            // tanpa saringan ini grup orang lain bisa teradopsi otomatis.
+            .filter { chat ->
+                runCatching { telegram.apakahPemilik(chat.id) }.getOrDefault(false)
+            }
         val gabungan = (telegram.daftarSupergroup() + dariPencarian)
             .distinctBy { it.id }
         return gabungan.mapNotNull { chat ->

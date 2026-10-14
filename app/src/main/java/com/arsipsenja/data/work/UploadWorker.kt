@@ -5,6 +5,7 @@ import android.net.Uri
 import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import androidx.work.workDataOf
 import com.arsipsenja.ArsipSenjaApp
 import com.arsipsenja.data.telegram.keBerkasMentah
 import com.arsipsenja.data.telegram.keEntity
@@ -30,10 +31,28 @@ class UploadWorker(
 
     private val tag = "UploadWorker"
 
+    /**
+     * Bungkus [kerjakan]: kegagalan yang lolos dari jalur dalam (mis.
+     * pengecualian tak tertangkap) tetap membawa pesan galat di outputData,
+     * agar UI bisa menampilkan alasan gagalnya — bukan hanya ID pekerjaan.
+     */
     override suspend fun doWork(): Result {
-        val uri = inputData.getString(K_URI)?.let(Uri::parse) ?: return Result.failure()
+        return try {
+            kerjakan()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // Pembatalan harus diteruskan apa adanya, bukan jadi FAILED.
+            throw e
+        } catch (e: Exception) {
+            Log.e(tag, "Unggah gagal tak tertangkap", e)
+            gagalDenganPesan(e.message ?: "Unggah gagal tanpa keterangan.")
+        }
+    }
+
+    private suspend fun kerjakan(): Result {
+        val uri = inputData.getString(K_URI)?.let(Uri::parse)
+            ?: return gagalDenganPesan("Berkas tidak ditemukan — pilih ulang berkasnya.")
         val koleksiId = inputData.getLong(K_KOLEKSI, -1L)
-        if (koleksiId <= 0L) return Result.failure()
+        if (koleksiId <= 0L) return gagalDenganPesan("Tujuan unggah tidak sah — pilih ulang koleksi.")
         val topikId = inputData.getInt(K_TOPIK, 0)
 
         val wadah = (applicationContext as ArsipSenjaApp).wadah
@@ -44,14 +63,15 @@ class UploadWorker(
         val koleksi = repo.alirKoleksi(kunci).first()
         if (koleksi == null) {
             Log.e(tag, "Koleksi $kunci tidak ada")
-            return Result.failure()
+            return gagalDenganPesan("Koleksi tujuan tidak ditemukan — mungkin sudah dihapus. Pilih koleksi lain.")
         }
 
         val namaAsli = namaDariUri(uri)
         val mime = applicationContext.contentResolver.getType(uri) ?: "*/*"
         val tipe = TipeFile.dariMime(mime, namaAsli)
 
-        val berkasCache = salinKeCache(uri, namaAsli) ?: return Result.failure()
+        val berkasCache = salinKeCache(uri, namaAsli)
+            ?: return gagalDenganPesan("Gagal menyalin berkas — izin akses berkas mungkin sudah tidak berlaku. Pilih ulang berkasnya.")
         var gagal = false
 
         try {
@@ -107,6 +127,10 @@ class UploadWorker(
 
         return if (gagal) Result.retry() else Result.success()
     }
+
+    /** Kegagalan terminal yang membawa pesan galat untuk ditampilkan UI. */
+    private fun gagalDenganPesan(pesan: String): Result =
+        Result.failure(workDataOf(K_PESAN_GALAT to pesan))
 
     /** Pantau progres unggah berdasarkan fileId pada pesan terkirim. */
     private suspend fun pantauProgresUnggah(
@@ -184,6 +208,9 @@ class UploadWorker(
     companion object {
         const val K_URI = "uri"
         const val K_KOLEKSI = "koleksiId"
+
+        /** Kunci outputData untuk pesan galat terminal (dibaca UI antrean). */
+        const val K_PESAN_GALAT = "pesanGalat"
 
         /** Id topik forum tujuan; 0 = channel lama / tanpa topik. */
         const val K_TOPIK = "topicId"

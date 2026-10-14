@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.work.WorkInfo
 import com.arsipsenja.data.local.KoleksiEntity
 import com.arsipsenja.data.telegram.ProgresBerkas
+import com.arsipsenja.data.work.UploadWorker
 import com.arsipsenja.ui.components.ArahTransfer
 import com.arsipsenja.ui.components.BilahPesan
 import com.arsipsenja.ui.components.ChipArsip
@@ -344,7 +345,15 @@ private fun BarisAntrean(info: WorkInfo, onBatalkan: () -> Unit) {
                 color = WarnaArsip.Tinta,
             )
             Text(
-                text = "Pekerjaan ${info.id.toString().take(8)}",
+                // Bila gagal, tampilkan alasan asli dari worker (bila ada)
+                // agar pengguna tahu kenapa — bukan hanya ID pekerjaan.
+                text = if (info.state == WorkInfo.State.FAILED) {
+                    info.outputData.getString(UploadWorker.K_PESAN_GALAT)
+                        ?.takeIf { it.isNotBlank() }
+                        ?: "Pekerjaan ${info.id.toString().take(8)}"
+                } else {
+                    "Pekerjaan ${info.id.toString().take(8)}"
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = WarnaArsip.Tinta3,
             )
