@@ -33,6 +33,17 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
 
+      - name: Pulihkan keystore debug persisten
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > debug.p12
+            echo "keystore debug persisten dipulihkan"
+          else
+            echo "secret ANDROID_DEBUG_KEYSTORE_B64 kosong; pakai debug key bawaan"
+          fi
+
       - name: Pastikan platform android-36 tersedia
         shell: bash
         run: |

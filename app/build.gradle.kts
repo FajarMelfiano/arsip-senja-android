@@ -25,6 +25,23 @@ android {
         }
     }
 
+    // Keystore debug PERSISTEN (disuplai CI dari secret ANDROID_DEBUG_KEYSTORE_B64).
+    // Tanpa ini, tiap runner CI membuat debug key baru sehingga APK build baru
+    // ditolak Android saat update menimpa ("package conflicts with an existing
+    // package"). Jika berkas tidak ada (build lokal), pakai debug key bawaan.
+    signingConfigs {
+        getByName("debug") {
+            val persistent = rootProject.file("debug.p12")
+            if (persistent.exists()) {
+                storeFile = persistent
+                storeType = "pkcs12"
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
+    }
+
     // Satu APK per ABI + satu APK universal (semua ABI).
     splits {
         abi {

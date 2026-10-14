@@ -24,4 +24,5 @@ outputs/
 # Keamanan: jangan pernah menyimpan kredensial di repo
 *.jks
 *.keystore
+*.p12
 google-services.json
