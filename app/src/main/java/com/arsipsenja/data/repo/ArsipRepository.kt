@@ -349,6 +349,12 @@ class ArsipRepository(
             }
             try {
                 telegram.aktifkanForum(vault)
+            } catch (e: IllegalArgumentException) {
+                // grupIdDariChat menolak chatId non-supergroup (bukan
+                // TelegramException sehingga tak tertangkap di bawah):
+                // perlakukan sebagai vault bertipe salah, jangan lempar mentah.
+                Log.i(tag, "Vault $vault bukan supergroup (validasi lokal): ${e.message}")
+                return pulihkanVaultTakSah(vault, labelVaultTerbaik(null, vault), nama)
             } catch (gagal: TelegramException) {
                 if (PenjagaVault.galatHanyaSupergroup(gagal.pesan)) {
                     return pulihkanVaultTakSah(vault, labelVaultTerbaik(null, vault), nama)
@@ -359,7 +365,29 @@ class ArsipRepository(
                     gagal,
                 )
             }
-            return telegram.pastikanTopik(vault, nama)
+            // Percobaan kedua: aktivasi "berhasil" tetapi forum bisa belum
+            // efektif (propagasi). Galat forum di sini diterjemahkan, tidak
+            // dilempar mentah; percobaan tidak diulang lagi (hindari loop).
+            try {
+                return telegram.pastikanTopik(vault, nama)
+            } catch (e2: TelegramException) {
+                if (PenjagaVault.galatBukanForum(e2.pesan) ||
+                    PenjagaVault.galatHanyaSupergroup(e2.pesan)
+                ) {
+                    throw TelegramException(
+                        PenjagaVault.terjemahkanGalatForum(e2.pesan),
+                        e2.kode,
+                        e2,
+                    )
+                }
+                throw e2
+            } catch (e2: IllegalArgumentException) {
+                throw TelegramException(
+                    PenjagaVault.terjemahkanGalatForum(e2.message ?: "galat tak dikenal"),
+                    0,
+                    e2,
+                )
+            }
         }
     }
 
@@ -395,7 +423,15 @@ class ArsipRepository(
                 Log.i(tag, "Vault basi $vault (tipe: $labelTipe) tanpa koleksi — ganti vault baru otomatis.")
                 pengaturan.setVaultChatId(null)
                 val baru = buatVaultBaru()
-                telegram.pastikanTopik(baru, nama)
+                try {
+                    telegram.pastikanTopik(baru, nama)
+                } catch (e: TelegramException) {
+                    throw TelegramException(
+                        PenjagaVault.terjemahkanGalatForum(e.pesan),
+                        e.kode,
+                        e,
+                    )
+                }
             }
         }
     }

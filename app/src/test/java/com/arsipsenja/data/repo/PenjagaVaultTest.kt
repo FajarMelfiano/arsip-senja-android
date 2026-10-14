@@ -80,4 +80,55 @@ class PenjagaVaultTest {
         assertTrue(pesan.contains("pemilik grup"))
         assertTrue(pesan.contains("Pengaturan"))
     }
+
+    // ---- d. pertahanan terakhir: tak ada pesan mentah "not a forum" di UI ----
+
+    @Test
+    fun galatNotAForumDiterjemahkanKeBahasaIndonesia() {
+        val hasil = PenjagaVault.terjemahkanGalatForum("The chat is not a forum")
+        assertFalse(hasil.contains("The chat is not a forum"))
+        assertTrue(hasil.contains("belum menjadi forum"))
+        assertTrue(hasil.contains("Pengaturan > Vault Telegram"))
+    }
+
+    @Test
+    fun galatHanyaSupergroupDiterjemahkanKePesanVault() {
+        val hasil = PenjagaVault.terjemahkanGalatForum(
+            "Forums can be enabled in supergroups only",
+        )
+        assertFalse(hasil.contains("Forums can be enabled"))
+        assertTrue(hasil.contains("bukan grup"))
+        assertTrue(hasil.contains("Pengaturan > Vault Telegram"))
+    }
+
+    @Test
+    fun galatBukanSupergroupLokalDiterjemahkanKePesanVault() {
+        val hasil = PenjagaVault.terjemahkanGalatForum("Bukan chat supergroup: -123")
+        assertFalse(hasil.contains("Bukan chat supergroup: -123"))
+        assertTrue(hasil.contains("bukan grup"))
+        assertTrue(hasil.contains("tak diketahui"))
+    }
+
+    @Test
+    fun pesanNonForumLolosApaAdanya() {
+        assertEquals(
+            "Jaringan bermasalah",
+            PenjagaVault.terjemahkanGalatForum("Jaringan bermasalah"),
+        )
+    }
+
+    @Test
+    fun pesanForumMasihGagalMenyebutPemilikDanVaultTelegram() {
+        val pesan = PenjagaVault.pesanForumMasihGagal()
+        assertTrue(pesan.contains("pemilik grup"))
+        assertTrue(pesan.contains("Pengaturan > Vault Telegram"))
+    }
+
+    @Test
+    fun pesanSudahJelasTidakDiubahLagi() {
+        val jelas = PenjagaVault.pesanVaultBukanSupergroup("channel")
+        assertEquals(jelas, PenjagaVault.terjemahkanGalatForum(jelas))
+        val aktivasi = PenjagaVault.pesanAktivasiGagal("CHAT_NOT_MODIFIED")
+        assertEquals(aktivasi, PenjagaVault.terjemahkanGalatForum(aktivasi))
+    }
 }

@@ -63,6 +63,40 @@ object PenjagaVault {
             "pilih ulang vault di Pengaturan."
 
     /**
+     * Galat bila aktivasi forum "berhasil" tetapi Telegram tetap menjawab
+     * bukan-forum (propagasi / forum belum efektif). Bukan soal jaringan —
+     * pengguna perlu memastikan kepemilikan lalu memilih ulang vault.
+     */
+    fun pesanForumMasihGagal(): String =
+        "Vault masih belum menjadi forum setelah aktivasi otomatis. " +
+            "Pastikan kamu pemilik grup, lalu pilih ulang vault di " +
+            "Pengaturan > Vault Telegram atau buat vault baru."
+
+    /**
+     * Terjemahkan galat mentah (TDLib Inggris / validasi lokal) menjadi
+     * pesan Bahasa Indonesia yang jelas + bisa ditindaklanjuti.
+     * Pertahanan terakhir sebelum teks sampai ke UI: pesan non-forum
+     * dikembalikan apa adanya, pesan Build #22 yang sudah jelas tidak
+     * diubah (terdeteksi dari penanda "Pengaturan").
+     */
+    fun terjemahkanGalatForum(pesan: String): String {
+        // Sudah diterjemahkan (pesan Build #22 / pesanForumMasihGagal):
+        // semuanya menyebut "Pengaturan", yang tak pernah ada di teks TDLib.
+        if (pesan.contains("Pengaturan")) return pesan
+        // Validasi lokal grupIdDariChat — chatId bukan supergroup.
+        if (pesan.startsWith("Bukan chat supergroup:")) {
+            return pesanVaultBukanSupergroup("tak diketahui")
+        }
+        if (galatHanyaSupergroup(pesan)) {
+            return pesanVaultBukanSupergroup("tak diketahui")
+        }
+        if (galatBukanForum(pesan)) {
+            return pesanForumMasihGagal()
+        }
+        return pesan
+    }
+
+    /**
      * Putuskan pemulihan vault bukan-supergroup.
      *
      * @param adaKoleksiTerdaftar true bila ada koleksi di indeks lokal yang

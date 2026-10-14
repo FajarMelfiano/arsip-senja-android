@@ -11,6 +11,7 @@ import com.arsipsenja.data.local.PengaturanStore
 import com.arsipsenja.data.local.StatistikBerkas
 import com.arsipsenja.data.local.BerkasArsipEntity
 import com.arsipsenja.data.repo.ArsipRepository
+import com.arsipsenja.data.repo.PenjagaVault
 import com.arsipsenja.data.telegram.TelegramException
 import com.arsipsenja.util.ArahUrut
 import com.arsipsenja.util.StatusLokal
@@ -188,7 +189,8 @@ class DasborViewModel(
                 val daftar = repo.tarikDaftarKoleksi()
                 _pesan.value = "${daftar.size} koleksi ditemukan di akunmu."
             } catch (e: Exception) {
-                _pesan.value = "Gagal menarik daftar koleksi: ${e.message}"
+                _pesan.value = "Gagal menarik daftar koleksi: " +
+                    PenjagaVault.terjemahkanGalatForum(e.message ?: "galat tak dikenal")
             } finally {
                 _memuat.value = false
             }
@@ -214,7 +216,8 @@ class DasborViewModel(
                 repo.buatKoleksi(nama.trim(), deskripsi.trim(), label, warna, tipe)
                 _pesan.value = "Koleksi \"$nama\" dibuat di Telegram."
             } catch (e: Exception) {
-                _pesan.value = "Gagal membuat koleksi: ${e.message}"
+                _pesan.value = "Gagal membuat koleksi: " +
+                    PenjagaVault.terjemahkanGalatForum(e.message ?: "galat tak dikenal")
             } finally {
                 _memuat.value = false
             }
@@ -258,7 +261,8 @@ class DasborViewModel(
                     "Semua topik kategori sudah ada di Telegram."
                 }
             } catch (e: Exception) {
-                _pesan.value = "Gagal memeriksa topik: ${e.message}"
+                _pesan.value = "Gagal memeriksa topik: " +
+                    PenjagaVault.terjemahkanGalatForum(e.message ?: "galat tak dikenal")
             } finally {
                 _memuat.value = false
             }

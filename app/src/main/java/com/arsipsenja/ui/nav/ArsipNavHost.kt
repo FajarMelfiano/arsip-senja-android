@@ -29,6 +29,7 @@ import com.arsipsenja.ui.screens.BerkasScreen
 import com.arsipsenja.ui.screens.DasborScreen
 import com.arsipsenja.ui.screens.LoginScreen
 import com.arsipsenja.ui.screens.PengaturanScreen
+import com.arsipsenja.ui.screens.PohonArsipScreen
 import com.arsipsenja.ui.screens.TautanScreen
 import com.arsipsenja.ui.screens.UnggahScreen
 import com.arsipsenja.ui.theme.WarnaArsip
@@ -40,6 +41,7 @@ private object Rute {
     const val DASBOR = "dasbor"
     const val UNGGAH = "unggah"
     const val TAUTAN = "tautan"
+    const val POHON = "pohon"
     const val PENGATURAN = "pengaturan"
     const val BERKAS = "berkas/{berkasId}"
 
@@ -96,6 +98,7 @@ fun ArsipNavHost(
         ItemBawah("Dasbor", ArsipIcons.LayoutGrid, Rute.DASBOR),
         ItemBawah("Unggah", ArsipIcons.Upload, Rute.UNGGAH),
         ItemBawah("Tautan", ArsipIcons.Link, Rute.TAUTAN),
+        ItemBawah("Pohon", ArsipIcons.Folder, Rute.POHON),
         ItemBawah("Pengaturan", ArsipIcons.Settings, Rute.PENGATURAN),
     )
 
@@ -147,6 +150,11 @@ fun ArsipNavHost(
             }
             composable(Rute.UNGGAH) { UnggahScreen() }
             composable(Rute.TAUTAN) { TautanScreen() }
+            composable(Rute.POHON) {
+                PohonArsipScreen(
+                    onBukaBerkas = { id -> navController.navigate(Rute.berkas(id)) },
+                )
+            }
             composable(Rute.PENGATURAN) { PengaturanScreen() }
             composable(
                 route = Rute.BERKAS,
