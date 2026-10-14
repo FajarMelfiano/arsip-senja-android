@@ -16,6 +16,7 @@ import com.arsipsenja.data.local.KunciBaru
 import com.arsipsenja.data.local.KunciKoleksi
 import com.arsipsenja.data.local.KunciRahasia
 import com.arsipsenja.data.local.PengaturanStore
+import com.arsipsenja.data.local.PenandaImpor
 import com.arsipsenja.data.local.StatistikBerkas
 import com.arsipsenja.data.local.TautanEntity
 import com.arsipsenja.data.local.TipeKunci
@@ -63,7 +64,19 @@ class ArsipRepository(
 
     fun alirStatistik(): Flow<StatistikBerkas> = berkasDao.alirStatistik()
 
+    /** Statistik khusus koleksi pribadi (tanpa hasil tarik-impor). */
+    fun alirStatistikPribadi(): Flow<StatistikBerkas> = berkasDao.alirStatistikPribadi()
+
     fun alirKoleksi(): Flow<List<KoleksiEntity>> = koleksiDao.alirSemua()
+
+    /**
+     * Koleksi pribadi: sumber Dasbor, Pohon, Unggah, Tautan.
+     * Hasil tarik-impor tidak pernah masuk aliran ini.
+     */
+    fun alirKoleksiPribadi(): Flow<List<KoleksiEntity>> = koleksiDao.alirPribadi()
+
+    /** Koleksi hasil "Tarik dari Telegram": hanya untuk tab Impor. */
+    fun alirKoleksiImpor(): Flow<List<KoleksiEntity>> = koleksiDao.alirImpor()
 
     fun alirKoleksi(kunci: KunciKoleksi): Flow<KoleksiEntity?> =
         koleksiDao.alir(kunci.chatId, kunci.topicId)
@@ -377,13 +390,22 @@ class ArsipRepository(
     // ---- Sinkronisasi ----
 
     /**
-     * Sinkronkan semua koleksi yang sudah terdaftar (ambil riwayat terbaru,
-     * masukkan berkas baru ke indeks lokal).
+     * Sinkronkan semua koleksi PRIBADI yang sudah terdaftar (ambil riwayat
+     * terbaru, masukkan berkas baru ke indeks lokal). Koleksi impor
+     * disinkron dari tab Impor via [sinkronImpor], bukan dari sini.
      */
     suspend fun sinkronSemua() {
-        val koleksi = koleksiDao.alirSemua().first()
+        val koleksi = koleksiDao.ambilSemuaPribadi()
         koleksi.forEach { sinkronKoleksi(it.kunci) }
         koleksiDao.hitungUlangSemua()
+    }
+
+    /** Sinkronkan semua koleksi impor (dipanggil dari tab Impor). */
+    suspend fun sinkronImpor(): Int {
+        val koleksi = koleksiDao.ambilSemuaImpor()
+        var baru = 0
+        koleksi.forEach { baru += sinkronKoleksi(it.kunci) }
+        return baru
     }
 
     /** Sinkron satu koleksi; mengembalikan jumlah berkas baru yang masuk. */
@@ -433,20 +455,55 @@ class ArsipRepository(
     }
 
     /**
-     * Tarik daftar koleksi dari Telegram dan petakan ke koleksi lokal.
-     * Bila vault sudah dipilih: tarik topik-topik di vault. Bila belum:
-     * tarik channel lama (kompatibel ke belakang).
+     * Tarik daftar koleksi impor dari Telegram — hasilnya masuk TAB IMPOR,
+     * bukan daftar pribadi.
+     *
+     * Sumber gabungan: vault aktif + semua vault forum-siap milik sendiri
+     * (dedupe per chatId) + channel lama. Tiap koleksi yang ditemukan
+     * langsung disinkronkan riwayatnya agar jumlah berkas langsung nyata.
+     * Satu sumber yang gagal tidak membatalkan sumber lain (isolasi
+     * per-sumber via runCatching).
+     *
+     * Anti-duplikat: hasil tarikan yang kuncinya SUDAH dikenal sebagai
+     * koleksi pribadi dilewati — pribadi tidak disentuh, tidak ditimpa,
+     * tidak digandakan ([PenandaImpor.bolehJadiImpor]).
+     *
+     * @return hanya koleksi bertanda impor.
      */
     suspend fun tarikDaftarKoleksi(): List<KoleksiEntity> {
-        val vault = pengaturan.vaultSekarang()
-        return if (vault != null) tarikTopikVault(vault) else tarikChannelLama()
+        val daftarVault = mutableListOf<Long>()
+        pengaturan.vaultSekarang()?.let { daftarVault += it }
+        runCatching { deteksiVaultMilikSendiri() }
+            .onFailure { Log.i(tag, "Deteksi vault untuk tarik gagal: ${it.message}") }
+            .getOrNull()
+            ?.forEach { if (it.chatId !in daftarVault) daftarVault += it.chatId }
+        val semua = mutableListOf<KoleksiEntity>()
+        daftarVault.forEach { vault ->
+            runCatching { tarikTopikVault(vault, sebagaiImpor = true) }
+                .onSuccess { semua += it }
+                .onFailure { Log.i(tag, "Tarik topik vault $vault gagal: ${it.message}") }
+        }
+        runCatching { tarikChannelLama(sebagaiImpor = true) }
+            .onSuccess { semua += it }
+            .onFailure { Log.i(tag, "Tarik channel lama gagal: ${it.message}") }
+        val unik = semua.distinctBy { it.kunci }
+        unik.forEach { koleksi ->
+            runCatching { sinkronKoleksi(koleksi.kunci) }
+                .onFailure { Log.i(tag, "Sinkron koleksi ${koleksi.kunci} gagal: ${it.message}") }
+        }
+        return unik
     }
 
-    private suspend fun tarikTopikVault(vault: Long): List<KoleksiEntity> {
+    /**
+     * Tarik topik-topik di satu vault. Bila [sebagaiImpor] true, entri
+     * ditandai impor dan yang sudah dikenal pribadi dilewati.
+     */
+    private suspend fun tarikTopikVault(vault: Long, sebagaiImpor: Boolean = false): List<KoleksiEntity> {
         val sekarang = System.currentTimeMillis()
-        val entri = telegram.daftarTopik(vault).map { topik ->
+        val entri = telegram.daftarTopik(vault).mapNotNull { topik ->
             val lama = koleksiDao.ambil(vault, topik.topicId)
-            KoleksiEntity(
+            if (sebagaiImpor && !PenandaImpor.bolehJadiImpor(lama)) return@mapNotNull null
+            val dasar = KoleksiEntity(
                 chatId = vault,
                 topicId = topik.topicId,
                 nama = topik.nama.ifBlank { "Topik ${topik.topicId}" },
@@ -465,17 +522,20 @@ class ArsipRepository(
                 dibuatPada = lama?.dibuatPada ?: sekarang,
                 terakhirSinkron = lama?.terakhirSinkron ?: 0L,
             )
+            if (sebagaiImpor) PenandaImpor.tandaiImpor(dasar) else dasar
         }
         koleksiDao.simpanSemua(entri)
         return entri
     }
 
-    private suspend fun tarikChannelLama(): List<KoleksiEntity> {
+    /** Tarik channel lama. Bila [sebagaiImpor] true, berlaku aturan impor. */
+    private suspend fun tarikChannelLama(sebagaiImpor: Boolean = false): List<KoleksiEntity> {
         val channel = telegram.daftarChannel()
         val sekarang = System.currentTimeMillis()
-        val entri = channel.map { chat ->
+        val entri = channel.mapNotNull { chat ->
             val lama = koleksiDao.ambil(chat.id, 0)
-            KoleksiEntity(
+            if (sebagaiImpor && !PenandaImpor.bolehJadiImpor(lama)) return@mapNotNull null
+            val dasar = KoleksiEntity(
                 chatId = chat.id,
                 topicId = 0,
                 nama = chat.title.orEmpty().ifBlank { "Koleksi ${chat.id}" },
@@ -491,6 +551,7 @@ class ArsipRepository(
                 dibuatPada = lama?.dibuatPada ?: sekarang,
                 terakhirSinkron = lama?.terakhirSinkron ?: 0L,
             )
+            if (sebagaiImpor) PenandaImpor.tandaiImpor(dasar) else dasar
         }
         koleksiDao.simpanSemua(entri)
         return entri
@@ -541,6 +602,9 @@ class ArsipRepository(
             kunciGaram = garamKunci,
             kunciHash = hashKunci,
             kunciBiometrik = bioKunci,
+            // Koleksi buatan pengguna selalu pribadi — sekalipun topiknya
+            // dipakai ulang dari hasil tarikan, kepemilikan beralih ke pribadi.
+            asalImpor = false,
             jumlahBerkas = lama?.jumlahBerkas ?: 0,
             dibuatPada = lama?.dibuatPada ?: sekarang,
             terakhirSinkron = lama?.terakhirSinkron ?: sekarang,
@@ -851,7 +915,7 @@ class ArsipRepository(
     }
 
     suspend fun koleksiTerpilihAtauPertama(): KunciKoleksi? =
-        koleksiDao.alirSemua().first().firstOrNull()?.kunci
+        koleksiDao.ambilSemuaPribadi().firstOrNull()?.kunci
 
     // ---- Unggah ----
 
@@ -892,14 +956,15 @@ class ArsipRepository(
     /**
      * Rute otomatis dengan pengecualian: koleksi terkunci yang belum dibuka
      * sesi ini dilewati ([kecuali]) — berkas tidak dikirim ke koleksi yang
-     * user belum buka kuncinya.
+     * user belum buka kuncinya. Hanya koleksi pribadi yang jadi tujuan;
+     * koleksi impor tidak menerima unggahan.
      */
     suspend fun unggahOtomatis(
         uris: List<Uri>,
         kecuali: Set<KunciKoleksi>,
     ): Map<KunciKoleksi, Int> {
         require(uris.isNotEmpty()) { "Belum ada berkas yang dipilih." }
-        val semua = koleksiDao.alirSemua().first()
+        val semua = koleksiDao.ambilSemuaPribadi()
         require(semua.isNotEmpty()) { "Buat kategori dulu di Kelola koleksi." }
         val daftar = semua.filter { it.kunci !in kecuali }
         require(daftar.isNotEmpty()) {
@@ -915,13 +980,13 @@ class ArsipRepository(
     }
 
     /**
-     * Periksa semua kategori topik dan buat ulang topik yang hilang di
+     * Periksa semua kategori PRIBADI dan buat ulang topik yang hilang di
      * Telegram (mis. dihapus dari luar aplikasi).
      *
      * @return jumlah topik yang dibuat ulang.
      */
     suspend fun perbaikiTopikHilang(): Int {
-        val daftar = koleksiDao.alirSemua().first().filter { it.adalahTopik }
+        val daftar = koleksiDao.ambilSemuaPribadi().filter { it.adalahTopik }
         var diperbaiki = 0
         daftar.forEach { k ->
             val awal = k.kunci

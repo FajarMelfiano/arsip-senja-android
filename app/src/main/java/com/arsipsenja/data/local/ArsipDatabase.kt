@@ -90,9 +90,23 @@ val MIGRASI_3_4 = object : Migration(3, 4) {
     }
 }
 
+/**
+ * Migrasi 4 -> 5: penanda asal impor untuk tab pisah.
+ *
+ * - `koleksi.asalImpor`: 0 = koleksi pribadi (default untuk semua data lama),
+ *   1 = hasil "Tarik dari Telegram" (hanya tab Impor).
+ *
+ * Data lama otomatis menjadi pribadi; tidak ada baris yang dihapus.
+ */
+val MIGRASI_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `koleksi` ADD COLUMN `asalImpor` INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
 @Database(
     entities = [BerkasArsipEntity::class, KoleksiEntity::class, TautanEntity::class],
-    version = 4,
+    version = 5,
     exportSchema = false,
 )
 abstract class ArsipDatabase : RoomDatabase() {
@@ -112,9 +126,7 @@ abstract class ArsipDatabase : RoomDatabase() {
                     ArsipDatabase::class.java,
                     "arsip-senja.db",
                 )
-                    .addMigrations(MIGRASI_1_2, MIGRASI_2_3, MIGRASI_3_4)
-                    // Indeks arsip selalu bisa dibangun ulang dari Telegram.
-                    .fallbackToDestructiveMigration()
+                    .addMigrations(MIGRASI_1_2, MIGRASI_2_3, MIGRASI_3_4, MIGRASI_4_5)
                     .build()
                     .also { instance = it }
             }

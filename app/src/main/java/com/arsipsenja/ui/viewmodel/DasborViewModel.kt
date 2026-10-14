@@ -8,6 +8,7 @@ import com.arsipsenja.data.local.KoleksiEntity
 import com.arsipsenja.data.local.KunciBaru
 import com.arsipsenja.data.local.KunciKoleksi
 import com.arsipsenja.data.local.KueriTampilan
+import com.arsipsenja.data.local.PenandaImpor
 import com.arsipsenja.data.local.PengaturanStore
 import com.arsipsenja.data.local.StatistikBerkas
 import com.arsipsenja.data.local.BerkasArsipEntity
@@ -29,6 +30,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -57,17 +59,27 @@ class DasborViewModel(
     private val _koleksiAktif = MutableStateFlow<KunciKoleksi?>(null)
     val koleksiAktif: StateFlow<KunciKoleksi?> = _koleksiAktif.asStateFlow()
 
+    /**
+     * Katalog pribadi: berkas milik koleksi impor disaring keluar di sini
+     * (tab Impor yang menampilkannya). Kunci impor diikuti reaktif agar
+     * berkas yang baru ketahuan milik impor langsung hilang dari Dasbor.
+     */
     val berkas: StateFlow<List<BerkasArsipEntity>> =
-        combine(_kata.debounce(250), _saringan) { kata, kueri ->
-            kueri.copy(kata = kata.trim().ifBlank { null })
+        combine(_kata.debounce(250), _saringan, repo.alirKoleksiImpor()) { kata, kueri, impor ->
+            kueri.copy(kata = kata.trim().ifBlank { null }) to PenandaImpor.kunciImpor(impor)
         }
-            .flatMapLatest { repo.alirBerkas(it) }
+            .flatMapLatest { (kueri, kunciImpor) ->
+                repo.alirBerkas(kueri).map { daftar ->
+                    daftar.filter { !PenandaImpor.milikImpor(it, kunciImpor) }
+                }
+            }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    val statistik: StateFlow<StatistikBerkas> = repo.alirStatistik()
+    val statistik: StateFlow<StatistikBerkas> = repo.alirStatistikPribadi()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), StatistikBerkas(0, 0L))
 
-    val koleksi: StateFlow<List<KoleksiEntity>> = repo.alirKoleksi()
+    /** Hanya koleksi pribadi — hasil tarikan tampil di tab Impor. */
+    val koleksi: StateFlow<List<KoleksiEntity>> = repo.alirKoleksiPribadi()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val tampilan: StateFlow<TampilanDasbor> = pengaturan.tampilanDasbor
@@ -184,12 +196,20 @@ class DasborViewModel(
         }
     }
 
+    /**
+     * Tarik dari Telegram: hasilnya masuk tab Impor (bukan daftar pribadi).
+     * Pesan sukses selalu menyebut tab Impor agar user tidak mencari di Dasbor.
+     */
     fun tarikDaftarKoleksi() {
         viewModelScope.launch {
             _memuat.value = true
             try {
                 val daftar = repo.tarikDaftarKoleksi()
-                _pesan.value = "${daftar.size} koleksi ditemukan di akunmu."
+                _pesan.value = if (daftar.isEmpty()) {
+                    "Tidak ada koleksi baru dari Telegram. Lihat tab Impor untuk hasil sebelumnya."
+                } else {
+                    "${daftar.size} koleksi impor diperbarui — lihat di tab Impor."
+                }
             } catch (e: Exception) {
                 _pesan.value = "Gagal menarik daftar koleksi: " +
                     PenjagaVault.terjemahkanGalatForum(e.message ?: "galat tak dikenal")

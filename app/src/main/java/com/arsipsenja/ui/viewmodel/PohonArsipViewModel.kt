@@ -43,11 +43,12 @@ class PohonArsipViewModel(
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     val pohon: StateFlow<PohonArsip> =
         combine(
-            repo.alirKoleksi(),
+            repo.alirKoleksiPribadi(),
             repo.alirBerkas(KueriTampilan(urut = UrutBerkas.NAMA, arah = ArahUrut.NAIK)),
             _kataCari,
             repo.koleksiTerbuka,
-        ) { koleksi, berkas, cari, terbuka ->
+            repo.alirKoleksiImpor(),
+        ) { koleksi, berkas, cari, terbuka, impor ->
             // Berkas milik koleksi terkunci yang belum dibuka sesi ini
             // disembunyikan dari pohon (simpul koleksi tetap tampil sebagai
             // "Terkunci" tanpa anak — ditentukan di layar via perluBukaKunci).
@@ -55,9 +56,12 @@ class PohonArsipViewModel(
                 .filter { it.terkunci && it.kunci !in terbuka }
                 .map { it.chatId to it.topicId }
                 .toSet()
+            // Berkas milik koleksi impor tidak tampil di Pohon pribadi.
+            val kunciImpor = com.arsipsenja.data.local.PenandaImpor.kunciImpor(impor)
             val terlihat = berkas.filter { b ->
                 val induk = b.koleksiId ?: b.chatId
-                (induk to b.topicId) !in kunciTerkunci
+                (induk to b.topicId) !in kunciTerkunci &&
+                    !com.arsipsenja.data.local.PenandaImpor.milikImpor(b, kunciImpor)
             }
             bangunPohon(koleksi, terlihat, cari)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PohonArsip.kosong())

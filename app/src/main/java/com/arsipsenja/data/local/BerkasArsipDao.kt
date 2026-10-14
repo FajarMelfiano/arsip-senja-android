@@ -13,6 +13,24 @@ interface BerkasArsipDao {
     @Query("SELECT COUNT(*) AS jumlah, COALESCE(SUM(ukuran), 0) AS total FROM berkas_arsip")
     fun alirStatistik(): Flow<StatistikBerkas>
 
+    /**
+     * Statistik khusus koleksi pribadi: berkas milik koleksi impor
+     * (asalImpor = 1, dicocokkan lewat koleksiId/chatId + topicId) dikecualikan
+     * agar angka Dasbor tidak tercampur hasil tarikan.
+     */
+    @Query(
+        """
+        SELECT COUNT(*) AS jumlah, COALESCE(SUM(ukuran), 0) AS total FROM berkas_arsip b
+        WHERE NOT EXISTS (
+            SELECT 1 FROM koleksi k
+            WHERE k.chatId = COALESCE(b.koleksiId, b.chatId)
+              AND k.topicId = b.topicId
+              AND k.asalImpor = 1
+        )
+        """,
+    )
+    fun alirStatistikPribadi(): Flow<StatistikBerkas>
+
     @Query("SELECT * FROM berkas_arsip WHERE id = :id")
     fun alirId(id: String): Flow<BerkasArsipEntity?>
 

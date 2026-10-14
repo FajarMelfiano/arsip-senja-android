@@ -21,6 +21,11 @@ import com.arsipsenja.util.TipeFile
  * - [kunciTipe]: nama enum [TipeKunci] (`TIDAK_ADA` = tidak dikunci).
  * - [kunciGaram]/[kunciHash]: garam + hash SHA-256 rahasia; null bila tak terkunci.
  * - [kunciBiometrik]: 1 = boleh dibuka dengan biometrik perangkat.
+ *
+ * Asal impor (tab pisah):
+ * - [asalImpor]: true = hasil "Tarik dari Telegram", tampil HANYA di tab
+ *   Impor; false = koleksi pribadi buatan pengguna, tampil di Dasbor/Pohon/
+ *   Unggah. Koleksi pribadi tidak pernah diubah oleh penarikan impor.
  */
 @Entity(
     tableName = "koleksi",
@@ -38,6 +43,7 @@ data class KoleksiEntity(
     @ColumnInfo(defaultValue = "NULL") val kunciGaram: String? = null,
     @ColumnInfo(defaultValue = "NULL") val kunciHash: String? = null,
     @ColumnInfo(defaultValue = "0") val kunciBiometrik: Int = 0,
+    @ColumnInfo(defaultValue = "0") val asalImpor: Boolean = false,
     val jumlahBerkas: Int,
     val dibuatPada: Long,
     val terakhirSinkron: Long,

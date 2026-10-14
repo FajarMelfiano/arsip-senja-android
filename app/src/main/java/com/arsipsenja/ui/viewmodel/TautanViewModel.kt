@@ -24,7 +24,7 @@ class TautanViewModel(
     val tautan: StateFlow<List<TautanEntity>> = repo.alirTautan()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    val koleksi: StateFlow<List<KoleksiEntity>> = repo.alirKoleksi()
+    val koleksi: StateFlow<List<KoleksiEntity>> = repo.alirKoleksiPribadi()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val _pesan = MutableStateFlow<String?>(null)

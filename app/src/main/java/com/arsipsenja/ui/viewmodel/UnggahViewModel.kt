@@ -30,7 +30,8 @@ class UnggahViewModel(
     private val telegram: TelegramClient,
 ) : ViewModel() {
 
-    val koleksi: StateFlow<List<KoleksiEntity>> = repo.alirKoleksi()
+    /** Koleksi tujuan: hanya pribadi — koleksi impor tidak menerima unggahan. */
+    val koleksi: StateFlow<List<KoleksiEntity>> = repo.alirKoleksiPribadi()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val _koleksiTerpilih = MutableStateFlow<KunciKoleksi?>(null)
@@ -69,7 +70,7 @@ class UnggahViewModel(
             }
         }
         viewModelScope.launch {
-            repo.alirKoleksi().collect { daftar ->
+            repo.alirKoleksiPribadi().collect { daftar ->
                 if (_koleksiTerpilih.value == null) {
                     _koleksiTerpilih.value = daftar.firstOrNull()?.kunci
                 }

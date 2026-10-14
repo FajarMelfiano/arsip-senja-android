@@ -7,6 +7,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.arsipsenja.ArsipSenjaApp
+import com.arsipsenja.data.repo.PenjagaVault
 import com.arsipsenja.data.telegram.keBerkasMentah
 import com.arsipsenja.data.telegram.keEntity
 import com.arsipsenja.util.TipeFile
@@ -31,6 +32,9 @@ class UploadWorker(
 
     private val tag = "UploadWorker"
 
+    /** Percobaan WorkManager saat ini (0 = percobaan pertama). */
+    private val percobaanKe = params.runAttemptCount
+
     /**
      * Bungkus [kerjakan]: kegagalan yang lolos dari jalur dalam (mis.
      * pengecualian tak tertangkap) tetap membawa pesan galat di outputData,
@@ -51,8 +55,12 @@ class UploadWorker(
     private suspend fun kerjakan(): Result {
         val uri = inputData.getString(K_URI)?.let(Uri::parse)
             ?: return gagalDenganPesan("Berkas tidak ditemukan — pilih ulang berkasnya.")
-        val koleksiId = inputData.getLong(K_KOLEKSI, -1L)
-        if (koleksiId <= 0L) return gagalDenganPesan("Tujuan unggah tidak sah — pilih ulang koleksi.")
+        // ChatId Telegram grup/supergroup selalu NEGATIF (-100...), jadi
+        // guard lama `<= 0` menolak SEMUA tujuan topik yang sah — itulah
+        // akar kenapa upload tidak pernah berhasil sejak awal. Hanya 0
+        // (tidak ada nilai) yang tidak sah.
+        val koleksiId = inputData.getLong(K_KOLEKSI, 0L)
+        if (koleksiId == 0L) return gagalDenganPesan("Tujuan unggah tidak sah — pilih ulang koleksi.")
         val topikId = inputData.getInt(K_TOPIK, 0)
 
         val wadah = (applicationContext as ArsipSenjaApp).wadah
@@ -73,6 +81,7 @@ class UploadWorker(
         val berkasCache = salinKeCache(uri, namaAsli)
             ?: return gagalDenganPesan("Gagal menyalin berkas — izin akses berkas mungkin sudah tidak berlaku. Pilih ulang berkasnya.")
         var gagal = false
+        var pesanGagalTerakhir: String? = null
 
         try {
             val potongan = pecahBilaBerlu(berkasCache)
@@ -116,6 +125,10 @@ class UploadWorker(
                 } catch (e: Exception) {
                     Log.e(tag, "Gagal unggah potongan $namaPotongan", e)
                     Notifikasi.tampilkanUnggah(applicationContext, namaPotongan, 0, selesai = true)
+                    // Simpan alasan gagalnya (galat forum diterjemahkan);
+                    // dipakai bila percobaan retry sudah habis.
+                    pesanGagalTerakhir =
+                        PenjagaVault.terjemahkanGalatForum(e.message ?: "Unggah gagal tanpa keterangan.")
                     gagal = true
                 } finally {
                     potonganFile.delete()
@@ -125,7 +138,12 @@ class UploadWorker(
             berkasCache.delete()
         }
 
-        return if (gagal) Result.retry() else Result.success()
+        // Gagal per-potongan: beri kesempatan retry terbatas untuk galat
+        // transien (jaringan), tapi pada percobaan terakhir kembalikan
+        // FAILED dengan pesan — jangan gagal diam-diam tanpa alasan.
+        if (!gagal) return Result.success()
+        if (percobaanKe < MAKS_PERCOBAAN_GAGAL) return Result.retry()
+        return gagalDenganPesan(pesanGagalTerakhir ?: "Unggah gagal — coba lagi.")
     }
 
     /** Kegagalan terminal yang membawa pesan galat untuk ditampilkan UI. */
@@ -214,6 +232,9 @@ class UploadWorker(
 
         /** Id topik forum tujuan; 0 = channel lama / tanpa topik. */
         const val K_TOPIK = "topicId"
+
+        /** Batas retry untuk gagal per-potongan (runAttemptCount 0..1 → retry, ke-2 → FAILED berpesan). */
+        private const val MAKS_PERCOBAAN_GAGAL = 2
 
         /** 1,9 miliar byte — di bawah batas ~2 GiB unggah Telegram. */
         private const val BATAS_POTONGAN = 1_900_000_000L

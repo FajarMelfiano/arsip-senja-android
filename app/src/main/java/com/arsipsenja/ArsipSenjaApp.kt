@@ -2,7 +2,6 @@ package com.arsipsenja
 
 import android.app.Application
 import android.content.Context
-import androidx.room.Room
 import androidx.work.Configuration
 import androidx.work.WorkManager
 import com.arsipsenja.data.local.ArsipDatabase
@@ -21,9 +20,9 @@ class AppContainer(context: Context) {
     val pengaturan: PengaturanStore by lazy { PengaturanStore(appContext) }
 
     val database: ArsipDatabase by lazy {
-        Room.databaseBuilder(appContext, ArsipDatabase::class.java, "arsip-senja.db")
-            .fallbackToDestructiveMigration()
-            .build()
+        // Selalu lewat get() agar migrasi eksplisit (1->2->3->4->5) jalan
+        // dan data lokal tidak pernah dihapus diam-diam.
+        ArsipDatabase.get(appContext)
     }
 
     val telegramClient: TelegramClient by lazy {

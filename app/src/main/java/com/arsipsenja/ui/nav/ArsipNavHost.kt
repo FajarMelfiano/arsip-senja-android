@@ -29,6 +29,7 @@ import com.arsipsenja.data.telegram.StatusOtorisasi
 import com.arsipsenja.ui.icons.ArsipIcons
 import com.arsipsenja.ui.screens.BerkasScreen
 import com.arsipsenja.ui.screens.DasborScreen
+import com.arsipsenja.ui.screens.ImporScreen
 import com.arsipsenja.ui.screens.LoginScreen
 import com.arsipsenja.ui.screens.PengaturanScreen
 import com.arsipsenja.ui.screens.PohonArsipScreen
@@ -44,6 +45,7 @@ private object Rute {
     const val UNGGAH = "unggah"
     const val TAUTAN = "tautan"
     const val POHON = "pohon"
+    const val IMPOR = "impor"
     const val PENGATURAN = "pengaturan"
     const val BERKAS = "berkas/{berkasId}"
 
@@ -101,6 +103,7 @@ fun ArsipNavHost(
         ItemBawah("Unggah", ArsipIcons.Upload, Rute.UNGGAH),
         ItemBawah("Tautan", ArsipIcons.Link, Rute.TAUTAN),
         ItemBawah("Pohon", ArsipIcons.Folder, Rute.POHON),
+        ItemBawah("Impor", ArsipIcons.Inbox, Rute.IMPOR),
         ItemBawah("Pengaturan", ArsipIcons.Settings, Rute.PENGATURAN),
     )
 
@@ -157,12 +160,24 @@ fun ArsipNavHost(
             composable(Rute.DASBOR) {
                 DasborScreen(
                     onBukaBerkas = { id -> navController.navigate(Rute.berkas(id)) },
+                    onBukaImpor = {
+                        navController.navigate(Rute.IMPOR) {
+                            popUpTo(Rute.DASBOR) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
                 )
             }
             composable(Rute.UNGGAH) { UnggahScreen() }
             composable(Rute.TAUTAN) { TautanScreen() }
             composable(Rute.POHON) {
                 PohonArsipScreen(
+                    onBukaBerkas = { id -> navController.navigate(Rute.berkas(id)) },
+                )
+            }
+            composable(Rute.IMPOR) {
+                ImporScreen(
                     onBukaBerkas = { id -> navController.navigate(Rute.berkas(id)) },
                 )
             }

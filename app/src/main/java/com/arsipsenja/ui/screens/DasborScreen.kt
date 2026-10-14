@@ -87,7 +87,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
  * urutan, toggle kisi/daftar, sinkronisasi, dan kelola koleksi.
  */
 @Composable
-fun DasborScreen(onBukaBerkas: (String) -> Unit) {
+fun DasborScreen(onBukaBerkas: (String) -> Unit, onBukaImpor: () -> Unit = {}) {
     val vm: DasborViewModel = viewModel(factory = DasborViewModel.Pabrik)
 
     val berkas by vm.berkas.collectAsState()
@@ -258,6 +258,10 @@ fun DasborScreen(onBukaBerkas: (String) -> Unit) {
             vm = vm,
             koleksi = koleksi,
             onTutup = { kelolaKoleksi = false },
+            onBukaImpor = {
+                kelolaKoleksi = false
+                onBukaImpor()
+            },
         )
     }
 
@@ -692,6 +696,7 @@ private fun LembarKoleksi(
     vm: DasborViewModel,
     koleksi: List<KoleksiEntity>,
     onTutup: () -> Unit,
+    onBukaImpor: () -> Unit,
 ) {
     var namaBaru by remember { mutableStateOf("") }
     var deskripsiBaru by remember { mutableStateOf("") }
@@ -897,6 +902,9 @@ private fun LembarKoleksi(
                 TextButton(onClick = vm::tarikDaftarKoleksi) {
                     Text("Tarik dari Telegram", color = WarnaArsip.Amber)
                 }
+            }
+            TextButton(onClick = onBukaImpor, modifier = Modifier.fillMaxWidth()) {
+                Text("Lihat hasil impor di tab Impor", color = WarnaArsip.VioletTerang)
             }
 
             if (koleksi.isEmpty()) {
