@@ -267,7 +267,7 @@ class ArsipRepository(
         tipe: Set<TipeFile> = emptySet(),
     ): KoleksiEntity {
         val vault = pastikanVault()
-        val topik = telegram.pastikanTopik(vault, nama.trim())
+        val topik = pastikanTopikDenganPerbaikanForum(vault, nama.trim())
         val lama = koleksiDao.ambil(vault, topik.topicId)
         val sekarang = System.currentTimeMillis()
         val labelBersih = label.trim().take(24).takeIf { it.isNotBlank() }
@@ -285,6 +285,35 @@ class ArsipRepository(
         )
         koleksiDao.simpan(koleksi)
         return koleksi
+    }
+
+    /**
+     * Pastikan topik ada; bila vault ternyata belum mode forum (mis. vault
+     * dipilih sebelum fitur aktivasi otomatis ada), aktifkan mode forum
+     * dulu lalu coba lagi sekali. Gagal aktivasi (mis. bukan pemilik grup)
+     * dilempar sebagai galat yang mudah dipahami.
+     */
+    private suspend fun pastikanTopikDenganPerbaikanForum(
+        vault: Long,
+        nama: String,
+    ): TelegramClient.InfoTopik {
+        return try {
+            telegram.pastikanTopik(vault, nama)
+        } catch (e: TelegramException) {
+            if (!e.pesan.contains("not a forum", ignoreCase = true)) throw e
+            try {
+                telegram.aktifkanForum(vault)
+            } catch (gagal: TelegramException) {
+                throw TelegramException(
+                    "Vault belum mode forum dan aktivasi otomatis gagal " +
+                        "(${gagal.pesan}). Pastikan kamu pemilik grup, lalu " +
+                        "pilih ulang vault di Pengaturan.",
+                    gagal.kode,
+                    gagal,
+                )
+            }
+            telegram.pastikanTopik(vault, nama)
+        }
     }
 
     /**
@@ -422,7 +451,7 @@ class ArsipRepository(
      */
     private suspend fun pastikanTopikKoleksi(kunci: KunciKoleksi): KunciKoleksi {
         val lokal = koleksiDao.ambil(kunci.chatId, kunci.topicId) ?: return kunci
-        val topik = telegram.pastikanTopik(kunci.chatId, lokal.nama)
+        val topik = pastikanTopikDenganPerbaikanForum(kunci.chatId, lokal.nama)
         if (topik.topicId != kunci.topicId) {
             val baru = lokal.copy(
                 chatId = topik.chatId,
