@@ -412,6 +412,38 @@ class TelegramClient(
     // Vault & topik forum
     // ---------------------------------------------------------------------
 
+    /** Ambil info chat via GetChat (dipakai untuk validasi tipe vault). */
+    suspend fun ambilChat(chatId: Long): TdApi.Chat =
+        kirim(TdApi.GetChat().apply { this.chatId = chatId })
+
+    /**
+     * True bila chat adalah supergroup biasa (bukan channel): satu-satunya
+     * tipe yang sah sebagai vault (bisa menampung topik forum).
+     */
+    fun adalahVaultSah(chat: TdApi.Chat): Boolean {
+        val tipe = chat.type
+        return tipe is TdApi.ChatTypeSupergroup && !tipe.isChannel
+    }
+
+    /**
+     * Label Bahasa Indonesia untuk tipe chat, dipakai di pesan galat vault
+     * agar pengguna tahu masalah sebenarnya (tipe salah, bukan kepemilikan).
+     * Perbandingan nama kelas dipakai agar tak bergantung pada semua varian
+     * TdApi.ChatType saat kompilasi.
+     */
+    fun labelTipeChat(chat: TdApi.Chat): String {
+        val tipe = chat.type
+        if (tipe is TdApi.ChatTypeSupergroup) {
+            return if (tipe.isChannel) "channel" else "grup"
+        }
+        return when (tipe?.javaClass?.simpleName) {
+            "ChatTypeBasicGroup" -> "grup biasa"
+            "ChatTypePrivate" -> "chat pribadi"
+            "ChatTypeSecret" -> "chat rahasia"
+            else -> "tipe lain"
+        }
+    }
+
     /** Info ringkas satu topik forum di dalam grup vault. */
     data class InfoTopik(
         val chatId: Long,

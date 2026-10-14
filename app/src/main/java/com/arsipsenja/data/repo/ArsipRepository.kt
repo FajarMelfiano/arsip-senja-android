@@ -27,6 +27,7 @@ import android.provider.OpenableColumns
 import java.util.UUID
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import org.drinkless.tdlib.TdApi
 
 /**
  * Sumber kebenaran aplikasi: Room sebagai indeks lokal, TDLib sebagai sumber
@@ -106,29 +107,56 @@ class ArsipRepository(
     suspend fun vaultTerpilih(): Long? = pengaturan.vaultSekarang()
 
     /**
-     * Pilih vault baru. Grup lama yang belum mode forum diaktifkan otomatis
-     * (membutuhkan hak pemilik grup) agar topik bisa dibuat.
+     * Pilih vault baru. Hanya supergroup (bukan channel) yang diterima;
+     * grup lama yang belum mode forum diaktifkan otomatis (membutuhkan hak
+     * pemilik grup) agar topik bisa dibuat.
      *
      * @return true bila mode forum baru saja diaktifkan untuk grup ini.
-     * @throws TelegramException bila aktivasi forum gagal.
+     * @throws TelegramException bila tipe chat salah atau aktivasi gagal.
      */
     suspend fun pilihVault(chatId: Long): Boolean {
+        val chatLama = runCatching { telegram.ambilChat(chatId) }.getOrNull()
+        if (chatLama != null && !telegram.adalahVaultSah(chatLama)) {
+            throw TelegramException(
+                PenjagaVault.pesanVaultBukanSupergroup(telegram.labelTipeChat(chatLama)) +
+                    " Pilih grup lain dari daftar.",
+            )
+        }
         val perluForum = try {
             telegram.daftarTopik(chatId)
             false
         } catch (e: TelegramException) {
-            if (!bukanForum(e)) throw e
-            telegram.aktifkanForum(chatId)
+            if (!PenjagaVault.galatBukanForum(e.pesan)) throw e
+            try {
+                telegram.aktifkanForum(chatId)
+            } catch (gagal: TelegramException) {
+                throw TelegramException(
+                    if (PenjagaVault.galatHanyaSupergroup(gagal.pesan)) {
+                        PenjagaVault.pesanVaultBukanSupergroup(labelVaultTerbaik(chatLama, chatId)) +
+                            " Pilih grup lain dari daftar."
+                    } else {
+                        PenjagaVault.pesanAktivasiGagal(gagal.pesan)
+                    },
+                    gagal.kode,
+                    gagal,
+                )
+            }
             true
         }
         pengaturan.setVaultChatId(chatId)
         return perluForum
     }
 
-    /** True bila galat TDLib berarti "chat ini bukan forum". */
-    private fun bukanForum(e: TelegramException): Boolean =
-        e.pesan.contains("forum", ignoreCase = true) ||
-            e.pesan.contains("CHAT_NOT_FORUM", ignoreCase = true)
+    /**
+     * Label tipe chat untuk pesan galat: pakai info yang sudah ada bila
+     * tersedia, bila tidak ambil ulang via GetChat, bila gagal tulis
+     * "tak diketahui".
+     */
+    private suspend fun labelVaultTerbaik(chat: TdApi.Chat?, chatId: Long): String {
+        if (chat != null) return telegram.labelTipeChat(chat)
+        return runCatching { telegram.labelTipeChat(telegram.ambilChat(chatId)) }
+            .getOrDefault("tak diketahui")
+    }
 
     /** Buat grup vault forum baru dan langsung jadikan vault aktif. */
     suspend fun buatVaultBaru(nama: String = NAMA_VAULT_BAWAAN): Long {
@@ -268,11 +296,14 @@ class ArsipRepository(
     ): KoleksiEntity {
         val vault = pastikanVault()
         val topik = pastikanTopikDenganPerbaikanForum(vault, nama.trim())
-        val lama = koleksiDao.ambil(vault, topik.topicId)
+        // Pakai chatId dari hasil (bukan vault lama) agar tetap benar bila
+        // vault basi diganti vault baru otomatis di dalam perbaikan forum.
+        val chatId = topik.chatId
+        val lama = koleksiDao.ambil(chatId, topik.topicId)
         val sekarang = System.currentTimeMillis()
         val labelBersih = label.trim().take(24).takeIf { it.isNotBlank() }
         val koleksi = KoleksiEntity(
-            chatId = vault,
+            chatId = chatId,
             topicId = topik.topicId,
             nama = topik.nama,
             deskripsi = deskripsi.trim().takeIf { it.isNotBlank() } ?: lama?.deskripsi,
@@ -290,29 +321,82 @@ class ArsipRepository(
     /**
      * Pastikan topik ada; bila vault ternyata belum mode forum (mis. vault
      * dipilih sebelum fitur aktivasi otomatis ada), aktifkan mode forum
-     * dulu lalu coba lagi sekali. Gagal aktivasi (mis. bukan pemilik grup)
-     * dilempar sebagai galat yang mudah dipahami.
+     * dulu lalu coba lagi sekali.
+     *
+     * Dua kegagalan dibedakan: supergroup yang belum forum diperbaiki
+     * otomatis (perilaku Build #21); vault yang BUKAN supergroup (mis.
+     * channel basi dari versi lama) TIDAK dicoba diaktifkan — melainkan
+     * dipulihkan via [pulihkanVaultTakSah] (ganti otomatis bila tak ada
+     * koleksi yang memakainya, bila ada beri galat yang jelas).
      */
     private suspend fun pastikanTopikDenganPerbaikanForum(
         vault: Long,
         nama: String,
     ): TelegramClient.InfoTopik {
-        return try {
-            telegram.pastikanTopik(vault, nama)
+        try {
+            return telegram.pastikanTopik(vault, nama)
         } catch (e: TelegramException) {
-            if (!e.pesan.contains("not a forum", ignoreCase = true)) throw e
+            val bukanForum = PenjagaVault.galatBukanForum(e.pesan)
+            val hanyaSupergroup = PenjagaVault.galatHanyaSupergroup(e.pesan)
+            if (!bukanForum && !hanyaSupergroup) throw e
+            val status = periksaVault(vault)
+            if (status is PenjagaVault.StatusVault.BukanSupergroup || hanyaSupergroup) {
+                // Vault bertipe salah: ToggleSupergroupIsForum pasti gagal,
+                // jadi jangan dipanggil sama sekali.
+                val label = (status as? PenjagaVault.StatusVault.BukanSupergroup)?.labelTipe
+                    ?: labelVaultTerbaik(null, vault)
+                return pulihkanVaultTakSah(vault, label, nama)
+            }
             try {
                 telegram.aktifkanForum(vault)
             } catch (gagal: TelegramException) {
+                if (PenjagaVault.galatHanyaSupergroup(gagal.pesan)) {
+                    return pulihkanVaultTakSah(vault, labelVaultTerbaik(null, vault), nama)
+                }
                 throw TelegramException(
-                    "Vault belum mode forum dan aktivasi otomatis gagal " +
-                        "(${gagal.pesan}). Pastikan kamu pemilik grup, lalu " +
-                        "pilih ulang vault di Pengaturan.",
+                    PenjagaVault.pesanAktivasiGagal(gagal.pesan),
                     gagal.kode,
                     gagal,
                 )
             }
-            telegram.pastikanTopik(vault, nama)
+            return telegram.pastikanTopik(vault, nama)
+        }
+    }
+
+    /** Periksa tipe chat vault via GetChat; gagal baca = TakDiketahui. */
+    private suspend fun periksaVault(vault: Long): PenjagaVault.StatusVault {
+        val chat = try {
+            telegram.ambilChat(vault)
+        } catch (e: Exception) {
+            Log.w(tag, "GetChat vault $vault gagal, lanjut alur lama: ${e.message}")
+            return PenjagaVault.StatusVault.TakDiketahui
+        }
+        return if (telegram.adalahVaultSah(chat)) {
+            PenjagaVault.StatusVault.Sah
+        } else {
+            PenjagaVault.StatusVault.BukanSupergroup(telegram.labelTipeChat(chat))
+        }
+    }
+
+    /**
+     * Pulihkan vault bertipe salah: tanpa koleksi terdaftar → buang vault
+     * basi, buat vault forum baru otomatis, lanjutkan pembuatan topik;
+     * dengan koleksi terdaftar → vault lama dipertahankan + galat jelas.
+     */
+    private suspend fun pulihkanVaultTakSah(
+        vault: Long,
+        labelTipe: String,
+        nama: String,
+    ): TelegramClient.InfoTopik {
+        val adaKoleksi = koleksiDao.alirSemua().first().any { it.chatId == vault }
+        return when (val putusan = PenjagaVault.putuskanVaultBukanSupergroup(labelTipe, adaKoleksi)) {
+            is PenjagaVault.Keputusan.Tolak -> throw TelegramException(putusan.pesan)
+            PenjagaVault.Keputusan.BuangDanBuatBaru -> {
+                Log.i(tag, "Vault basi $vault (tipe: $labelTipe) tanpa koleksi — ganti vault baru otomatis.")
+                pengaturan.setVaultChatId(null)
+                val baru = buatVaultBaru()
+                telegram.pastikanTopik(baru, nama)
+            }
         }
     }
 
@@ -452,7 +536,7 @@ class ArsipRepository(
     private suspend fun pastikanTopikKoleksi(kunci: KunciKoleksi): KunciKoleksi {
         val lokal = koleksiDao.ambil(kunci.chatId, kunci.topicId) ?: return kunci
         val topik = pastikanTopikDenganPerbaikanForum(kunci.chatId, lokal.nama)
-        if (topik.topicId != kunci.topicId) {
+        if (topik.chatId != kunci.chatId || topik.topicId != kunci.topicId) {
             val baru = lokal.copy(
                 chatId = topik.chatId,
                 topicId = topik.topicId,

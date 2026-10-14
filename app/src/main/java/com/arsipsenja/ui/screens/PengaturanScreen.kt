@@ -221,8 +221,9 @@ fun PengaturanScreen() {
         BarisLabel("Vault aktif", namaVaultAktif)
         Spacer(Modifier.height(6.dp))
         Text(
-            text = "Koleksi baru dibuat sebagai topik di grup vault ini. " +
-                "Pilih grup forum lamamu atau buat vault baru.",
+            text = "Vault adalah grup Telegram tempat semua koleksi disimpan sebagai topik; " +
+                "tiap berkas yang diunggah disimpan sebagai pesan di dalam topik koleksinya. " +
+                "Tanpa vault yang sah, koleksi tidak bisa dibuat.",
             style = MaterialTheme.typography.bodySmall,
             color = WarnaArsip.Tinta3,
         )
