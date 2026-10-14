@@ -5,12 +5,14 @@ package com.arsipsenja.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.arsipsenja.data.local.KoleksiEntity
+import com.arsipsenja.data.local.KunciBaru
 import com.arsipsenja.data.local.KunciKoleksi
 import com.arsipsenja.data.local.KueriTampilan
 import com.arsipsenja.data.local.PengaturanStore
 import com.arsipsenja.data.local.StatistikBerkas
 import com.arsipsenja.data.local.BerkasArsipEntity
 import com.arsipsenja.data.repo.ArsipRepository
+import com.arsipsenja.data.repo.GalatButuhVaultBaru
 import com.arsipsenja.data.repo.PenjagaVault
 import com.arsipsenja.data.telegram.TelegramException
 import com.arsipsenja.util.ArahUrut
@@ -199,23 +201,93 @@ class DasborViewModel(
 
     // ---- Koleksi ----
 
+    /** Parameter pembuatan koleksi terakhir (untuk tombol "coba lagi" vault baru). */
+    private data class PermintaanBuat(
+        val nama: String,
+        val deskripsi: String,
+        val label: String,
+        val warna: Int,
+        val tipe: Set<TipeFile>,
+        val kunci: KunciBaru?,
+    )
+
+    private var permintaanTerakhir: PermintaanBuat? = null
+    private var tundaBerhasil: (() -> Unit)? = null
+
+    /**
+     * True bila kegagalan terakhir membawa tawaran "Buat vault baru & coba
+     * lagi" (vault rusak tetapi dipakai koleksi lain).
+     */
+    private val _tawarkanVaultBaru = MutableStateFlow(false)
+    val tawarkanVaultBaru: StateFlow<Boolean> = _tawarkanVaultBaru.asStateFlow()
+
+    /**
+     * Buat koleksi (satu tombol membereskan vault + topik + kunci).
+     * Form TIDAK di-reset di sini — [onBerhasil] dipanggil hanya bila sukses
+     * sehingga data tetap terisi saat gagal dan user bisa coba lagi.
+     */
     fun buatKoleksi(
         nama: String,
         deskripsi: String,
         label: String = "",
         warna: Int = 0,
         tipe: Set<TipeFile> = emptySet(),
+        kunci: KunciBaru? = null,
+        onBerhasil: (() -> Unit)? = null,
     ) {
         if (nama.isBlank()) {
             _pesan.value = "Nama koleksi belum diisi."
             return
         }
+        permintaanTerakhir = PermintaanBuat(nama.trim(), deskripsi.trim(), label, warna, tipe, kunci)
+        tundaBerhasil = onBerhasil
         viewModelScope.launch {
             _memuat.value = true
             try {
-                repo.buatKoleksi(nama.trim(), deskripsi.trim(), label, warna, tipe)
-                _pesan.value = "Koleksi \"$nama\" dibuat di Telegram."
+                val m = permintaanTerakhir ?: return@launch
+                repo.buatKoleksi(m.nama, m.deskripsi, m.label, m.warna, m.tipe, m.kunci)
+                _tawarkanVaultBaru.value = false
+                _pesan.value = "Koleksi \"${m.nama}\" dibuat di Telegram."
+                tundaBerhasil?.invoke()
+                tundaBerhasil = null
+                permintaanTerakhir = null
+            } catch (e: GalatButuhVaultBaru) {
+                // Vault rusak + dipakai koleksi lain: vault lama dipertahankan,
+                // UI menawarkan tombol aksi (pesan dibawa apa adanya).
+                _tawarkanVaultBaru.value = true
+                _pesan.value = "Gagal membuat koleksi: ${e.pesan}"
             } catch (e: Exception) {
+                _tawarkanVaultBaru.value = false
+                _pesan.value = "Gagal membuat koleksi: " +
+                    PenjagaVault.terjemahkanGalatForum(e.message ?: "galat tak dikenal")
+            } finally {
+                _memuat.value = false
+            }
+        }
+    }
+
+    /**
+     * Aksi tombol "Buat vault baru & coba lagi": buat vault forum baru,
+     * jadikan aktif, lalu ulangi pembuatan koleksi dengan data form yang sama.
+     * Vault lama + koleksinya tidak dihapus/diutak-atik.
+     */
+    fun buatVaultBaruDanCobaLagi() {
+        val m = permintaanTerakhir ?: return
+        viewModelScope.launch {
+            _memuat.value = true
+            try {
+                repo.buatVaultBaru()
+                repo.buatKoleksi(m.nama, m.deskripsi, m.label, m.warna, m.tipe, m.kunci)
+                _tawarkanVaultBaru.value = false
+                _pesan.value = "Vault baru dibuat; koleksi \"${m.nama}\" dibuat di Telegram."
+                tundaBerhasil?.invoke()
+                tundaBerhasil = null
+                permintaanTerakhir = null
+            } catch (e: GalatButuhVaultBaru) {
+                _tawarkanVaultBaru.value = true
+                _pesan.value = "Gagal membuat koleksi: ${e.pesan}"
+            } catch (e: Exception) {
+                _tawarkanVaultBaru.value = false
                 _pesan.value = "Gagal membuat koleksi: " +
                     PenjagaVault.terjemahkanGalatForum(e.message ?: "galat tak dikenal")
             } finally {
@@ -277,6 +349,59 @@ class DasborViewModel(
                 _pesan.value = "Koleksi dihapus dari arsip."
             } catch (e: Exception) {
                 _pesan.value = "Gagal menghapus koleksi: ${e.message}"
+            } finally {
+                _memuat.value = false
+            }
+        }
+    }
+
+    // ---- Kunci koleksi (sumber bersama untuk Katalog, Pohon, Kelola, Unggah) ----
+
+    /** Koleksi yang sudah dibuka sesi ini (mengikuti repository). */
+    val koleksiTerbuka: StateFlow<Set<KunciKoleksi>> = repo.koleksiTerbuka
+
+    /** True bila koleksi terkunci DAN belum dibuka sesi ini. */
+    fun perluBukaKunci(entitas: KoleksiEntity?): Boolean = repo.perluBukaKunci(entitas)
+
+    /** Cari entity koleksi untuk satu berkas (untuk gating ketuk berkas). */
+    fun entitasUntuk(chatId: Long, topicId: Int): KoleksiEntity? =
+        koleksi.value.firstOrNull { it.chatId == chatId && it.topicId == topicId }
+
+    /** Coba buka dengan rahasia; hasil lewat [panggilBalik] (true = cocok). */
+    fun bukaKunci(kunci: KunciKoleksi, rahasia: String, panggilBalik: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val cocok = try {
+                repo.bukaKunci(kunci, rahasia)
+            } catch (_: Exception) {
+                false
+            }
+            panggilBalik(cocok)
+        }
+    }
+
+    /** Tandai terbuka setelah BiometricPrompt sukses di UI. */
+    fun bukaKunciBiometrik(kunci: KunciKoleksi) {
+        repo.bukaKunciBiometrik(kunci)
+    }
+
+    /**
+     * Ganti/hapus kunci koleksi ([kunciBaru] null = hapus). Ubah/hapus wajib
+     * verifikasi kunci lama dulu bila terkunci (ditegakkan repository).
+     */
+    fun aturKunci(kunci: KunciKoleksi, rahasiaLama: String?, kunciBaru: KunciBaru?) {
+        viewModelScope.launch {
+            _memuat.value = true
+            try {
+                repo.ubahKunci(kunci, rahasiaLama, kunciBaru)
+                _pesan.value = if (kunciBaru == null) {
+                    "Kunci koleksi dihapus."
+                } else {
+                    "Kunci koleksi diperbarui."
+                }
+            } catch (e: TelegramException) {
+                _pesan.value = e.pesan
+            } catch (e: Exception) {
+                _pesan.value = e.message ?: "Gagal mengubah kunci."
             } finally {
                 _memuat.value = false
             }

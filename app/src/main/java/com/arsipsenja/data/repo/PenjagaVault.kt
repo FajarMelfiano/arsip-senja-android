@@ -1,5 +1,20 @@
 package com.arsipsenja.data.repo
 
+import com.arsipsenja.data.telegram.TelegramException
+
+/**
+ * Galat vault terstruktur: vault rusak tetapi dipakai koleksi lain sehingga
+ * TIDAK boleh diganti otomatis. UI menangkap tipe ini (bukan sekadar pesan)
+ * untuk menampilkan tombol aksi "Buat vault baru & coba lagi".
+ *
+ * Subkelas [TelegramException] agar penangkap galat lama tetap berfungsi —
+ * pesannya sudah Bahasa Indonesia dan menyebut "Pengaturan".
+ */
+class GalatButuhVaultBaru(
+    pesan: String,
+    sebab: Throwable? = null,
+) : TelegramException(pesan, 0, sebab)
+
 /**
  * Aturan murni (tanpa Android/TDLib) untuk validasi dan pemulihan vault.
  *

@@ -12,10 +12,13 @@ import com.arsipsenja.data.local.BerkasArsipEntity
 import com.arsipsenja.data.local.JenisTautan
 import com.arsipsenja.data.local.KoleksiEntity
 import com.arsipsenja.data.local.KueriTampilan
+import com.arsipsenja.data.local.KunciBaru
 import com.arsipsenja.data.local.KunciKoleksi
+import com.arsipsenja.data.local.KunciRahasia
 import com.arsipsenja.data.local.PengaturanStore
 import com.arsipsenja.data.local.StatistikBerkas
 import com.arsipsenja.data.local.TautanEntity
+import com.arsipsenja.data.local.TipeKunci
 import com.arsipsenja.data.telegram.TelegramClient
 import com.arsipsenja.data.telegram.TelegramException
 import com.arsipsenja.data.telegram.keBerkasMentah
@@ -26,6 +29,9 @@ import com.arsipsenja.util.TipeFile
 import android.provider.OpenableColumns
 import java.util.UUID
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import org.drinkless.tdlib.TdApi
 
@@ -172,6 +178,59 @@ class ArsipRepository(
     suspend fun pastikanVault(): Long =
         pengaturan.vaultSekarang() ?: buatVaultBaru()
 
+    /** Ringkasan kesehatan vault aktif untuk layar Pengaturan. */
+    data class InfoVault(
+        val chatId: Long?,
+        val nama: String,
+        /** True bila grup sah + topik forum bisa dibaca. */
+        val forumSiap: Boolean,
+        /** Penjelasan singkat bila tidak siap; null bila siap. */
+        val masalah: String?,
+    )
+
+    /**
+     * Baca nama grup vault (via GetChat, fallback ke ID mentah) + status
+     * kesehatan (tipe supergroup + coba daftarTopik, seperti [periksaVault]).
+     */
+    suspend fun infoVaultAktif(): InfoVault {
+        val vault = pengaturan.vaultSekarang()
+            ?: return InfoVault(null, "Belum dipilih", false, "Belum ada vault yang dipilih.")
+        val chat = runCatching { telegram.ambilChat(vault) }.getOrNull()
+        val nama = chat?.title?.ifBlank { null } ?: "Grup $vault"
+        if (chat != null && !telegram.adalahVaultSah(chat)) {
+            return InfoVault(
+                vault, nama, false,
+                "Vault bertipe ${telegram.labelTipeChat(chat)}, bukan grup.",
+            )
+        }
+        return try {
+            telegram.daftarTopik(vault)
+            InfoVault(vault, nama, true, null)
+        } catch (e: Exception) {
+            val mentah = e.message ?: "galat tak dikenal"
+            // Pesan status konteks Pengaturan (tanpa klaim "setelah aktivasi",
+            // karena di sini tidak ada aktivasi yang dicoba).
+            val masalah = when {
+                PenjagaVault.galatHanyaSupergroup(mentah) ->
+                    PenjagaVault.pesanVaultBukanSupergroup("tak diketahui")
+                PenjagaVault.galatBukanForum(mentah) -> "Forum belum aktif di grup ini."
+                else -> mentah
+            }
+            InfoVault(vault, nama, false, masalah)
+        }
+    }
+
+    /**
+     * Perbaiki vault aktif satu ketukan: validasi tipe + aktivasi forum
+     * (jalur [pilihVault]), lalu kembalikan info kesehatan terbaru.
+     */
+    suspend fun perbaikiVaultAktif(): InfoVault {
+        val vault = pengaturan.vaultSekarang()
+            ?: throw TelegramException("Belum ada vault yang dipilih.")
+        pilihVault(vault)
+        return infoVaultAktif()
+    }
+
     // ---- Sinkronisasi ----
 
     /**
@@ -249,6 +308,16 @@ class ArsipRepository(
                 topicId = topik.topicId,
                 nama = topik.nama.ifBlank { "Topik ${topik.topicId}" },
                 deskripsi = lama?.deskripsi,
+                // Pertahankan SEMUA metadata lokal saat rebuild — rebuild
+                // hanya menyegarkan nama dari Telegram, bukan menimpa
+                // kustomisasi pengguna (label, warna, tipe, kunci).
+                label = lama?.label,
+                warna = lama?.warna ?: 0,
+                tipeFile = lama?.tipeFile ?: "",
+                kunciTipe = lama?.kunciTipe ?: TipeKunci.TIDAK_ADA.name,
+                kunciGaram = lama?.kunciGaram,
+                kunciHash = lama?.kunciHash,
+                kunciBiometrik = lama?.kunciBiometrik ?: 0,
                 jumlahBerkas = lama?.jumlahBerkas ?: 0,
                 dibuatPada = lama?.dibuatPada ?: sekarang,
                 terakhirSinkron = lama?.terakhirSinkron ?: 0L,
@@ -268,6 +337,13 @@ class ArsipRepository(
                 topicId = 0,
                 nama = chat.title.orEmpty().ifBlank { "Koleksi ${chat.id}" },
                 deskripsi = lama?.deskripsi,
+                label = lama?.label,
+                warna = lama?.warna ?: 0,
+                tipeFile = lama?.tipeFile ?: "",
+                kunciTipe = lama?.kunciTipe ?: TipeKunci.TIDAK_ADA.name,
+                kunciGaram = lama?.kunciGaram,
+                kunciHash = lama?.kunciHash,
+                kunciBiometrik = lama?.kunciBiometrik ?: 0,
                 jumlahBerkas = lama?.jumlahBerkas ?: 0,
                 dibuatPada = lama?.dibuatPada ?: sekarang,
                 terakhirSinkron = lama?.terakhirSinkron ?: 0L,
@@ -283,9 +359,15 @@ class ArsipRepository(
      * Buat koleksi baru sebagai topik forum di vault. Vault dibuat otomatis
      * bila pengguna belum memilih. Topik yang sudah ada dipakai ulang.
      *
+     * Satu tombol membereskan semuanya: vault disiapkan otomatis (dibuat /
+     * dipulihkan bila rusak dan tak dipakai koleksi mana pun), lalu topik
+     * dibuat — user tidak mengurus vault secara terpisah.
+     *
      * @param label chip label opsional (maks 24 karakter).
      * @param warna ARGB untuk dot/chip kategori, 0 = warna tema.
      * @param tipe himpunan tipe berkas untuk rute otomatis; kosong = semua tipe.
+     * @param kunci kunci pengaman koleksi baru; null = tanpa kunci. Bila topik
+     * dipakai ulang dan [kunci] null, kunci lama dipertahankan.
      */
     suspend fun buatKoleksi(
         nama: String,
@@ -293,6 +375,7 @@ class ArsipRepository(
         label: String = "",
         warna: Int = 0,
         tipe: Set<TipeFile> = emptySet(),
+        kunci: KunciBaru? = null,
     ): KoleksiEntity {
         val vault = pastikanVault()
         val topik = pastikanTopikDenganPerbaikanForum(vault, nama.trim())
@@ -302,6 +385,7 @@ class ArsipRepository(
         val lama = koleksiDao.ambil(chatId, topik.topicId)
         val sekarang = System.currentTimeMillis()
         val labelBersih = label.trim().take(24).takeIf { it.isNotBlank() }
+        val (tipeKunci, garamKunci, hashKunci, bioKunci) = kunciDisimpan(kunci, lama)
         val koleksi = KoleksiEntity(
             chatId = chatId,
             topicId = topik.topicId,
@@ -310,6 +394,10 @@ class ArsipRepository(
             label = labelBersih ?: lama?.label,
             warna = warna.takeIf { it != 0 } ?: lama?.warna ?: 0,
             tipeFile = if (tipe.isEmpty()) lama?.tipeFile ?: "" else tipe.joinToString(",") { it.name },
+            kunciTipe = tipeKunci,
+            kunciGaram = garamKunci,
+            kunciHash = hashKunci,
+            kunciBiometrik = bioKunci,
             jumlahBerkas = lama?.jumlahBerkas ?: 0,
             dibuatPada = lama?.dibuatPada ?: sekarang,
             terakhirSinkron = lama?.terakhirSinkron ?: sekarang,
@@ -317,6 +405,42 @@ class ArsipRepository(
         koleksiDao.simpan(koleksi)
         return koleksi
     }
+
+    /**
+     * Hitung kolom kunci untuk entity baru: kunci yang diberikan divalidasi
+     * lalu di-hash (rahasia plaintext tidak pernah disimpan); bila null,
+     * kunci lama dipertahankan (kasus topik dipakai ulang).
+     */
+    private fun kunciDisimpan(
+        kunci: KunciBaru?,
+        lama: KoleksiEntity?,
+    ): KunciEmpat {
+        if (kunci == null) {
+            return KunciEmpat(
+                lama?.kunciTipe ?: TipeKunci.TIDAK_ADA.name,
+                lama?.kunciGaram,
+                lama?.kunciHash,
+                lama?.kunciBiometrik ?: 0,
+            )
+        }
+        val galat = KunciRahasia.validasi(kunci.tipe, kunci.rahasia)
+            ?: if (kunci.tipe == TipeKunci.TIDAK_ADA) "Pilih jenis kunci dulu." else null
+        if (galat != null) throw TelegramException(galat)
+        val garam = KunciRahasia.buatGaram()
+        return KunciEmpat(
+            kunci.tipe.name,
+            garam,
+            KunciRahasia.hash(kunci.rahasia, garam),
+            if (kunci.biometrik) 1 else 0,
+        )
+    }
+
+    private data class KunciEmpat(
+        val tipe: String,
+        val garam: String?,
+        val hash: String?,
+        val biometrik: Int,
+    )
 
     /**
      * Pastikan topik ada; bila vault ternyata belum mode forum (mis. vault
@@ -368,15 +492,25 @@ class ArsipRepository(
             // Percobaan kedua: aktivasi "berhasil" tetapi forum bisa belum
             // efektif (propagasi). Galat forum di sini diterjemahkan, tidak
             // dilempar mentah; percobaan tidak diulang lagi (hindari loop).
+            // Kebijakan pulihkanVaultTakSah diperluas ke jalur ini: bila
+            // vault tak dipakai koleksi mana pun, ganti vault baru otomatis
+            // dan lanjutkan (aman — tidak ada koleksi yang kehilangan rumah).
+            // Bila dipakai koleksi lain, lempar galat terstruktur agar UI bisa
+            // menawarkan tombol "Buat vault baru & coba lagi" (vault lama
+            // tidak diutak-atik).
             try {
                 return telegram.pastikanTopik(vault, nama)
             } catch (e2: TelegramException) {
                 if (PenjagaVault.galatBukanForum(e2.pesan) ||
                     PenjagaVault.galatHanyaSupergroup(e2.pesan)
                 ) {
-                    throw TelegramException(
+                    val dipakai = koleksiDao.alirSemua().first().any { it.chatId == vault }
+                    if (!dipakai) {
+                        Log.i(tag, "Vault $vault belum forum setelah aktivasi, tanpa koleksi — ganti vault baru otomatis.")
+                        return gantiVaultOtomatisDanBuatTopik(nama)
+                    }
+                    throw GalatButuhVaultBaru(
                         PenjagaVault.terjemahkanGalatForum(e2.pesan),
-                        e2.kode,
                         e2,
                     )
                 }
@@ -409,7 +543,8 @@ class ArsipRepository(
     /**
      * Pulihkan vault bertipe salah: tanpa koleksi terdaftar → buang vault
      * basi, buat vault forum baru otomatis, lanjutkan pembuatan topik;
-     * dengan koleksi terdaftar → vault lama dipertahankan + galat jelas.
+     * dengan koleksi terdaftar → vault lama dipertahankan + galat TERSTRUKTUR
+     * ([GalatButuhVaultBaru]) agar UI bisa menawarkan tombol aksi.
      */
     private suspend fun pulihkanVaultTakSah(
         vault: Long,
@@ -418,22 +553,109 @@ class ArsipRepository(
     ): TelegramClient.InfoTopik {
         val adaKoleksi = koleksiDao.alirSemua().first().any { it.chatId == vault }
         return when (val putusan = PenjagaVault.putuskanVaultBukanSupergroup(labelTipe, adaKoleksi)) {
-            is PenjagaVault.Keputusan.Tolak -> throw TelegramException(putusan.pesan)
+            is PenjagaVault.Keputusan.Tolak -> throw GalatButuhVaultBaru(putusan.pesan)
             PenjagaVault.Keputusan.BuangDanBuatBaru -> {
                 Log.i(tag, "Vault basi $vault (tipe: $labelTipe) tanpa koleksi — ganti vault baru otomatis.")
-                pengaturan.setVaultChatId(null)
-                val baru = buatVaultBaru()
-                try {
-                    telegram.pastikanTopik(baru, nama)
-                } catch (e: TelegramException) {
-                    throw TelegramException(
-                        PenjagaVault.terjemahkanGalatForum(e.pesan),
-                        e.kode,
-                        e,
-                    )
-                }
+                gantiVaultOtomatisDanBuatTopik(nama)
             }
         }
+    }
+
+    /**
+     * Buang vault aktif (basi), buat vault forum baru, jadikan aktif, lalu
+     * buat topik [nama] di dalamnya. Vault lama + koleksinya TIDAK
+     * dihapus/diutak-atik (user bisa kembali lewat Pengaturan bila mau).
+     */
+    private suspend fun gantiVaultOtomatisDanBuatTopik(nama: String): TelegramClient.InfoTopik {
+        pengaturan.setVaultChatId(null)
+        val baru = buatVaultBaru()
+        try {
+            return telegram.pastikanTopik(baru, nama)
+        } catch (e: TelegramException) {
+            throw TelegramException(
+                PenjagaVault.terjemahkanGalatForum(e.pesan),
+                e.kode,
+                e,
+            )
+        }
+    }
+
+    // ---- Kunci koleksi ----
+
+    /**
+     * Koleksi yang sudah dibuka sesi ini (in-memory, hilang saat proses mati).
+     * Satu sumber kebenaran untuk Katalog, Pohon, Kelola, dan Unggah.
+     */
+    private val _koleksiTerbuka = MutableStateFlow<Set<KunciKoleksi>>(emptySet())
+    val koleksiTerbuka: StateFlow<Set<KunciKoleksi>> = _koleksiTerbuka.asStateFlow()
+
+    /** True bila koleksi terkunci DAN belum dibuka sesi ini. */
+    fun perluBukaKunci(entitas: KoleksiEntity?): Boolean =
+        KunciRahasia.perluBukaKunci(entitas, _koleksiTerbuka.value)
+
+    /**
+     * Coba buka koleksi dengan rahasia (PIN/kata sandi/pola "0-1-4-7-8").
+     * True bila cocok (koleksi ditandai terbuka sesi ini).
+     */
+    suspend fun bukaKunci(kunci: KunciKoleksi, rahasia: String): Boolean {
+        val entitas = koleksiDao.ambil(kunci.chatId, kunci.topicId) ?: return false
+        if (!entitas.terkunci) return true
+        val cocok = KunciRahasia.verifikasi(
+            rahasia, entitas.kunciGaram.orEmpty(), entitas.kunciHash.orEmpty(),
+        )
+        if (cocok) _koleksiTerbuka.value += kunci
+        return cocok
+    }
+
+    /**
+     * Tandai terbuka setelah BiometricPrompt sukses di UI.
+     * Repository tidak memanggil biometrik — hanya mencatat hasilnya.
+     */
+    fun bukaKunciBiometrik(kunci: KunciKoleksi) {
+        _koleksiTerbuka.value += kunci
+    }
+
+    /**
+     * Ganti/hapus kunci koleksi. Bila koleksi sedang terkunci, [rahasiaLama]
+     * WAJIB cocok dulu. [kunciBaru] null berarti hapus kunci.
+     *
+     * @throws TelegramException "Kunci lama salah." bila verifikasi gagal,
+     * atau pesan validasi bila kunci baru tidak valid.
+     */
+    suspend fun ubahKunci(kunci: KunciKoleksi, rahasiaLama: String?, kunciBaru: KunciBaru?) {
+        val entitas = koleksiDao.ambil(kunci.chatId, kunci.topicId)
+            ?: throw TelegramException("Koleksi tidak ditemukan.")
+        if (entitas.terkunci) {
+            val cocok = KunciRahasia.verifikasi(
+                rahasiaLama.orEmpty(), entitas.kunciGaram.orEmpty(), entitas.kunciHash.orEmpty(),
+            )
+            if (!cocok) throw TelegramException("Kunci lama salah.")
+        }
+        if (kunciBaru == null) {
+            koleksiDao.simpan(
+                entitas.copy(
+                    kunciTipe = TipeKunci.TIDAK_ADA.name,
+                    kunciGaram = null,
+                    kunciHash = null,
+                    kunciBiometrik = 0,
+                ),
+            )
+            _koleksiTerbuka.value -= kunci
+            return
+        }
+        val galat = KunciRahasia.validasi(kunciBaru.tipe, kunciBaru.rahasia)
+        if (galat != null) throw TelegramException(galat)
+        val garam = KunciRahasia.buatGaram()
+        koleksiDao.simpan(
+            entitas.copy(
+                kunciTipe = kunciBaru.tipe.name,
+                kunciGaram = garam,
+                kunciHash = KunciRahasia.hash(kunciBaru.rahasia, garam),
+                kunciBiometrik = if (kunciBaru.biometrik) 1 else 0,
+            ),
+        )
+        // Kunci diganti oleh pemilik yang terverifikasi — anggap terbuka sesi ini.
+        _koleksiTerbuka.value += kunci
     }
 
     /**
@@ -482,6 +704,7 @@ class ArsipRepository(
         berkasDao.hapusUntukKoleksi(kunci.chatId, kunci.topicId)
         tautanDao.hapusUntukKoleksi(kunci.chatId, kunci.topicId)
         koleksiDao.hapus(kunci.chatId, kunci.topicId)
+        _koleksiTerbuka.value -= kunci
     }
 
     suspend fun koleksiTerpilihAtauPertama(): KunciKoleksi? =
@@ -520,10 +743,25 @@ class ArsipRepository(
      *
      * @return peta kunci koleksi → jumlah berkas yang dirutekan ke sana.
      */
-    suspend fun unggahOtomatis(uris: List<Uri>): Map<KunciKoleksi, Int> {
+    suspend fun unggahOtomatis(uris: List<Uri>): Map<KunciKoleksi, Int> =
+        unggahOtomatis(uris, kecuali = emptySet())
+
+    /**
+     * Rute otomatis dengan pengecualian: koleksi terkunci yang belum dibuka
+     * sesi ini dilewati ([kecuali]) — berkas tidak dikirim ke koleksi yang
+     * user belum buka kuncinya.
+     */
+    suspend fun unggahOtomatis(
+        uris: List<Uri>,
+        kecuali: Set<KunciKoleksi>,
+    ): Map<KunciKoleksi, Int> {
         require(uris.isNotEmpty()) { "Belum ada berkas yang dipilih." }
-        val daftar = koleksiDao.alirSemua().first()
-        require(daftar.isNotEmpty()) { "Buat kategori dulu di Kelola koleksi." }
+        val semua = koleksiDao.alirSemua().first()
+        require(semua.isNotEmpty()) { "Buat kategori dulu di Kelola koleksi." }
+        val daftar = semua.filter { it.kunci !in kecuali }
+        require(daftar.isNotEmpty()) {
+            "Semua koleksi terkunci — buka dulu kuncinya sebelum mengunggah."
+        }
         val perKunci = mutableMapOf<KunciKoleksi, MutableList<Uri>>()
         uris.forEach { uri ->
             val target = pilihKategoriUntuk(deteksiTipe(uri), daftar)

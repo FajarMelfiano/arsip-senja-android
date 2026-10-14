@@ -2,6 +2,7 @@ package com.arsipsenja.ui.nav
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
@@ -16,6 +17,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -123,7 +125,16 @@ fun ArsipNavHost(
                                     contentDescription = item.label,
                                 )
                             },
-                            label = { Text(item.label) },
+                            label = {
+                                Text(
+                                    item.label,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    style = MaterialTheme.typography.labelMedium.copy(
+                                        fontSize = 11.sp,
+                                    ),
+                                )
+                            },
                             colors = NavigationBarItemDefaults.colors(
                                 selectedIconColor = WarnaArsip.Amber,
                                 selectedTextColor = WarnaArsip.Amber,

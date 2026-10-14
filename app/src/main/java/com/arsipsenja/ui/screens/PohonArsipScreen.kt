@@ -23,6 +23,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -30,9 +33,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.arsipsenja.data.local.KoleksiEntity
 import com.arsipsenja.ui.components.IkonBerkas
 import com.arsipsenja.ui.components.KeadaanKosong
 import com.arsipsenja.ui.components.KolomCari
+import com.arsipsenja.ui.components.LencanaTerkunci
+import com.arsipsenja.ui.components.SheetBukaKunci
 import com.arsipsenja.ui.components.ikonTipe
 import com.arsipsenja.ui.icons.ArsipIcons
 import com.arsipsenja.ui.pohon.SimpulBerkas
@@ -58,6 +64,11 @@ fun PohonArsipScreen(onBukaBerkas: (String) -> Unit) {
     val pohon by vm.pohon.collectAsState()
     val kataCari by vm.kataCari.collectAsState()
     val terbuka by vm.terbuka.collectAsState()
+    var bukaUntuk by remember { mutableStateOf<KoleksiEntity?>(null) }
+
+    /** Koleksi terkunci: tampil nama + gembok, TANPA anak sampai dibuka. */
+    fun terkunci(simpul: SimpulKoleksi): Boolean =
+        !simpul.yatim && vm.perluBukaKunci(simpul.koleksi)
 
     val mencari = kataCari.isNotBlank()
     fun buka(idSimpul: String): Boolean = if (mencari) true else terbuka[idSimpul] == true
@@ -66,6 +77,7 @@ fun PohonArsipScreen(onBukaBerkas: (String) -> Unit) {
     val baris = mutableListOf<Pair<SimpulPohon, Int>>()
     fun tambah(simpul: SimpulPohon, kedalaman: Int) {
         baris += simpul to kedalaman
+        if (simpul is SimpulKoleksi && terkunci(simpul)) return
         if ((simpul is SimpulKoleksi || simpul is SimpulTipe) && buka(simpul.idSimpul)) {
             simpul.anak.forEach { tambah(it, kedalaman + 1) }
         }
@@ -151,12 +163,20 @@ fun PohonArsipScreen(onBukaBerkas: (String) -> Unit) {
             ) {
                 items(baris, key = { it.first.idSimpul }) { (simpul, kedalaman) ->
                     when (simpul) {
-                        is SimpulKoleksi -> BarisKoleksiPohon(
-                            simpul = simpul,
-                            kedalaman = kedalaman,
-                            terbuka = buka(simpul.idSimpul),
-                            onJungkit = { vm.jungkit(simpul.idSimpul) },
-                        )
+                        is SimpulKoleksi -> if (terkunci(simpul)) {
+                            BarisKoleksiTerkunci(
+                                simpul = simpul,
+                                kedalaman = kedalaman,
+                                onBuka = { bukaUntuk = simpul.koleksi },
+                            )
+                        } else {
+                            BarisKoleksiPohon(
+                                simpul = simpul,
+                                kedalaman = kedalaman,
+                                terbuka = buka(simpul.idSimpul),
+                                onJungkit = { vm.jungkit(simpul.idSimpul) },
+                            )
+                        }
                         is SimpulTipe -> BarisTipePohon(
                             simpul = simpul,
                             kedalaman = kedalaman,
@@ -170,8 +190,9 @@ fun PohonArsipScreen(onBukaBerkas: (String) -> Unit) {
                         )
                         else -> Unit
                     }
-                    // Baris "Belum ada berkas" untuk koleksi kosong yang dibuka.
-                    if (simpul is SimpulKoleksi && !simpul.yatim &&
+                    // Baris "Belum ada berkas" untuk koleksi kosong yang dibuka
+                    // (koleksi terkunci tidak menampilkan baris ini).
+                    if (simpul is SimpulKoleksi && !simpul.yatim && !terkunci(simpul) &&
                         simpul.anak.isEmpty() && buka(simpul.idSimpul)
                     ) {
                         BarisBelumAdaBerkas(kedalaman = kedalaman + 1)
@@ -179,6 +200,18 @@ fun PohonArsipScreen(onBukaBerkas: (String) -> Unit) {
                 }
             }
         }
+    }
+
+    bukaUntuk?.let { target ->
+        SheetBukaKunci(
+            koleksi = target,
+            onTutup = { bukaUntuk = null },
+            onBerhasil = { bukaUntuk = null },
+            verifikasi = { rahasia, panggilBalik ->
+                vm.bukaKunci(target.kunci, rahasia, panggilBalik)
+            },
+            onBiometrikLolos = { vm.bukaKunciBiometrik(target.kunci) },
+        )
     }
 }
 
@@ -239,6 +272,62 @@ private fun IkonBukaTutup(terbuka: Boolean) {
         tint = WarnaArsip.Tinta3,
         modifier = Modifier.size(18.dp),
     )
+}
+
+/** Baris koleksi terkunci: nama + gembok + "Terkunci", tanpa anak. */
+@Composable
+private fun BarisKoleksiTerkunci(
+    simpul: SimpulKoleksi,
+    kedalaman: Int,
+    onBuka: () -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp)
+            .background(WarnaArsip.Permukaan, RoundedCornerShape(10.dp))
+            .clickable(onClick = onBuka)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+    ) {
+        PanduanIndentasi(kedalaman)
+        Icon(
+            imageVector = ArsipIcons.Folder,
+            contentDescription = null,
+            tint = WarnaArsip.Tinta3,
+            modifier = Modifier.size(16.dp),
+        )
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = simpul.nama,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = WarnaArsip.Tinta,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                Spacer(Modifier.width(6.dp))
+                LencanaTerkunci()
+            }
+            Text(
+                text = "Buka kunci untuk melihat isi",
+                style = MaterialTheme.typography.bodySmall,
+                color = WarnaArsip.Tinta3,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        TextButton(onClick = onBuka) {
+            Text(
+                text = "Buka",
+                style = MaterialTheme.typography.labelLarge,
+                color = WarnaArsip.AmberTerang,
+            )
+        }
+    }
 }
 
 /** Baris koleksi: kartu Folder + dot warna + chip label + hitungan. */

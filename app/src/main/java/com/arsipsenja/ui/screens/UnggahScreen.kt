@@ -21,13 +21,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.work.WorkInfo
+import com.arsipsenja.data.local.KoleksiEntity
 import com.arsipsenja.data.telegram.ProgresBerkas
 import com.arsipsenja.ui.components.ArahTransfer
 import com.arsipsenja.ui.components.BilahPesan
@@ -35,6 +40,7 @@ import com.arsipsenja.ui.components.ChipArsip
 import com.arsipsenja.ui.components.KeadaanKosong
 import com.arsipsenja.ui.components.NadaPesan
 import com.arsipsenja.ui.components.ProgresTransfer
+import com.arsipsenja.ui.components.SheetBukaKunci
 import com.arsipsenja.ui.components.TombolCadangan
 import com.arsipsenja.ui.components.TombolUtama
 import com.arsipsenja.ui.icons.ArsipIcons
@@ -59,11 +65,29 @@ fun UnggahScreen() {
     val antrean by vm.antrean.collectAsState()
     val transfer by vm.transfer.collectAsState()
     val pesan by vm.pesan.collectAsState()
+    val dibuka by vm.koleksiTerbuka.collectAsState()
+
+    var bukaUntuk by remember { mutableStateOf<KoleksiEntity?>(null) }
 
     val pemilihBerkas = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments(),
     ) { hasil ->
         if (hasil.isNotEmpty()) vm.mulaiUnggah(hasil)
+    }
+
+    // Koleksi tujuan manual + status kuncinya (diingat mengikuti daftar).
+    val tujuan: KoleksiEntity? = remember(koleksi, terpilih) {
+        koleksi.firstOrNull { it.kunci == terpilih }
+    }
+    val tujuanTerkunci = remember(tujuan, dibuka) { vm.perluBukaKunci(tujuan) }
+
+    /** Pilih berkas: koleksi terkunci meminta buka kunci dulu sebelum picker. */
+    fun pilihBerkas() {
+        if (!ruteOtomatis && tujuanTerkunci && tujuan != null) {
+            bukaUntuk = tujuan
+        } else {
+            pemilihBerkas.launch(arrayOf("*/*"))
+        }
     }
 
     Column(
@@ -168,8 +192,34 @@ fun UnggahScreen() {
             TombolUtama(
                 teks = "Pilih berkas untuk diunggah",
                 ikon = ArsipIcons.Upload,
-                onClick = { pemilihBerkas.launch(arrayOf("*/*")) },
+                onClick = ::pilihBerkas,
             )
+
+            if (!ruteOtomatis && tujuanTerkunci && tujuan != null) {
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = ArsipIcons.Lock,
+                        contentDescription = "Terkunci",
+                        tint = WarnaArsip.Tinta3,
+                        modifier = Modifier.size(14.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "Tujuan terkunci — buka dulu sebelum mengunggah.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = WarnaArsip.Tinta2,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { bukaUntuk = tujuan }) {
+                        Text(
+                            text = "Buka",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = WarnaArsip.Amber,
+                        )
+                    }
+                }
+            }
 
             Spacer(Modifier.height(10.dp))
 
@@ -238,6 +288,22 @@ fun UnggahScreen() {
                 )
             }
         }
+    }
+
+    bukaUntuk?.let { target ->
+        SheetBukaKunci(
+            koleksi = target,
+            onTutup = { bukaUntuk = null },
+            onBerhasil = {
+                bukaUntuk = null
+                // Lanjutkan memilih berkas setelah kunci dibuka.
+                pemilihBerkas.launch(arrayOf("*/*"))
+            },
+            verifikasi = { rahasia, panggilBalik ->
+                vm.bukaKunci(target.kunci, rahasia, panggilBalik)
+            },
+            onBiometrikLolos = { vm.bukaKunciBiometrik(target.kunci) },
+        )
     }
 }
 

@@ -40,7 +40,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.window.Dialog
+import com.arsipsenja.data.local.KunciBaru
 import com.arsipsenja.data.local.KunciKoleksi
+import com.arsipsenja.data.local.KunciRahasia
+import com.arsipsenja.data.local.TipeKunci
 import com.arsipsenja.util.TipeFile
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -52,19 +55,25 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.arsipsenja.data.local.BerkasArsipEntity
 import com.arsipsenja.data.local.KoleksiEntity
+import com.arsipsenja.ui.components.BagianKunciBaru
 import com.arsipsenja.ui.components.BarisKatalog
 import com.arsipsenja.ui.components.BilahPesan
 import com.arsipsenja.ui.components.ChipArsip
 import com.arsipsenja.ui.components.KartuKatalog
 import com.arsipsenja.ui.components.KeadaanKosong
 import com.arsipsenja.ui.components.KolomCari
+import com.arsipsenja.ui.components.LencanaTerkunci
 import com.arsipsenja.ui.components.NadaPesan
+import com.arsipsenja.ui.components.SheetBukaKunci
 import com.arsipsenja.ui.components.StatistikArsip
+import com.arsipsenja.ui.components.TombolCadangan
 import com.arsipsenja.ui.components.TombolIkon
 import com.arsipsenja.ui.components.TombolUtama
+import com.arsipsenja.ui.components.perangkatDukungBiometrik
 import com.arsipsenja.ui.icons.ArsipIcons
 import com.arsipsenja.ui.theme.Fraunces
 import com.arsipsenja.ui.theme.WarnaArsip
@@ -89,10 +98,36 @@ fun DasborScreen(onBukaBerkas: (String) -> Unit) {
     val saringan by vm.saringan.collectAsState()
     val memuat by vm.memuat.collectAsState()
     val pesan by vm.pesan.collectAsState()
+    val dibuka by vm.koleksiTerbuka.collectAsState()
 
     var kelolaKoleksi by remember { mutableStateOf(false) }
     var menuUrutTerbuka by remember { mutableStateOf(false) }
     var pilihSinkron by remember { mutableStateOf(false) }
+    var bukaUntuk by remember { mutableStateOf<KoleksiEntity?>(null) }
+    var tertundaBerkasId by remember { mutableStateOf<String?>(null) }
+
+    // Berkas milik koleksi terkunci yang belum dibuka sesi ini disembunyikan
+    // dari katalog maupun hasil cari (di semua tampilan kisi/daftar).
+    val tampil = remember(berkas, koleksi, dibuka) {
+        val peta = koleksi.associateBy { it.chatId to it.topicId }
+        berkas.filter { b ->
+            val induk = peta[b.chatId to b.topicId]
+                ?: b.koleksiId?.let { peta[it to b.topicId] }
+            !KunciRahasia.perluBukaKunci(induk, dibuka)
+        }
+    }
+
+    /** Ketuk berkas: koleksi terkunci meminta buka kunci dulu, baru detail. */
+    fun ketukBerkas(b: BerkasArsipEntity) {
+        val induk = vm.entitasUntuk(b.chatId, b.topicId)
+            ?: b.koleksiId?.let { vm.entitasUntuk(it, b.topicId) }
+        if (induk != null && vm.perluBukaKunci(induk)) {
+            tertundaBerkasId = b.id
+            bukaUntuk = induk
+        } else {
+            onBukaBerkas(b.id)
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -137,7 +172,9 @@ fun DasborScreen(onBukaBerkas: (String) -> Unit) {
             BarisFilterKoleksi(
                 koleksi = koleksi,
                 terpilih = saringan.kunciKoleksi,
+                terkunci = vm::perluBukaKunci,
                 onPilih = vm::saringKoleksi,
+                onBuka = { bukaUntuk = it },
                 modifier = Modifier.weight(1f),
             )
             MenuUrut(
@@ -158,7 +195,7 @@ fun DasborScreen(onBukaBerkas: (String) -> Unit) {
 
         Spacer(Modifier.height(4.dp))
 
-        if (berkas.isEmpty()) {
+        if (tampil.isEmpty()) {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
                 item {
                     if (kata.isBlank() && saringan.tipe == null && saringan.kunciKoleksi == null) {
@@ -187,19 +224,19 @@ fun DasborScreen(onBukaBerkas: (String) -> Unit) {
             }
         } else if (tampilan == TampilanDasbor.KISI) {
             DaftarKisi(
-                daftar = berkas,
+                daftar = tampil,
                 namaKoleksi = { kunci -> koleksi.firstOrNull { it.kunci == kunci }?.nama },
                 status = vm::statusLokal,
                 onMintaThumbnail = vm::mintaThumbnail,
-                onBuka = onBukaBerkas,
+                onBuka = ::ketukBerkas,
             )
         } else {
             DaftarBaris(
-                daftar = berkas,
+                daftar = tampil,
                 namaKoleksi = { kunci -> koleksi.firstOrNull { it.kunci == kunci }?.nama },
                 status = vm::statusLokal,
                 onMintaThumbnail = vm::mintaThumbnail,
-                onBuka = onBukaBerkas,
+                onBuka = ::ketukBerkas,
             )
         }
     }
@@ -221,6 +258,26 @@ fun DasborScreen(onBukaBerkas: (String) -> Unit) {
             vm = vm,
             koleksi = koleksi,
             onTutup = { kelolaKoleksi = false },
+        )
+    }
+
+    bukaUntuk?.let { target ->
+        val segar = koleksi.firstOrNull { it.kunci == target.kunci } ?: target
+        SheetBukaKunci(
+            koleksi = segar,
+            onTutup = {
+                bukaUntuk = null
+                tertundaBerkasId = null
+            },
+            onBerhasil = {
+                bukaUntuk = null
+                tertundaBerkasId?.let { onBukaBerkas(it) }
+                tertundaBerkasId = null
+            },
+            verifikasi = { rahasia, panggilBalik ->
+                vm.bukaKunci(target.kunci, rahasia, panggilBalik)
+            },
+            onBiometrikLolos = { vm.bukaKunciBiometrik(target.kunci) },
         )
     }
 }
@@ -294,7 +351,9 @@ private fun BarisFilterTipe(tipe: TipeFile?, onPilih: (TipeFile?) -> Unit) {
 private fun BarisFilterKoleksi(
     koleksi: List<KoleksiEntity>,
     terpilih: KunciKoleksi?,
+    terkunci: (KoleksiEntity) -> Boolean,
     onPilih: (KunciKoleksi?) -> Unit,
+    onBuka: (KoleksiEntity) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -309,11 +368,58 @@ private fun BarisFilterKoleksi(
             onClick = { onPilih(null) },
         )
         koleksi.forEach { k ->
-            ChipArsip(
-                label = k.nama,
-                terpilih = terpilih == k.kunci,
-                jumlah = k.jumlahBerkas,
-                onClick = { onPilih(if (terpilih == k.kunci) null else k.kunci) },
+            if (terkunci(k)) {
+                ChipTerkunci(koleksi = k, onBuka = { onBuka(k) })
+            } else {
+                ChipArsip(
+                    label = k.nama,
+                    terpilih = terpilih == k.kunci,
+                    jumlah = k.jumlahBerkas,
+                    onClick = { onPilih(if (terpilih == k.kunci) null else k.kunci) },
+                )
+            }
+        }
+    }
+}
+
+/** Chip koleksi terkunci: gembok + nama + "Terkunci" + tombol Buka. */
+@Composable
+private fun ChipTerkunci(koleksi: KoleksiEntity, onBuka: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .border(
+                androidx.compose.foundation.BorderStroke(1.dp, WarnaArsip.GarisRambut),
+                androidx.compose.foundation.shape.RoundedCornerShape(999.dp),
+            )
+            .background(WarnaArsip.Permukaan, androidx.compose.foundation.shape.RoundedCornerShape(999.dp))
+            .padding(start = 10.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+    ) {
+        Icon(
+            imageVector = ArsipIcons.Lock,
+            contentDescription = "Terkunci",
+            tint = WarnaArsip.Tinta3,
+            modifier = Modifier.size(12.dp),
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = koleksi.nama,
+            style = MaterialTheme.typography.labelMedium,
+            color = WarnaArsip.Tinta2,
+            maxLines = 1,
+            modifier = Modifier.width(72.dp),
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.width(4.dp))
+        LencanaTerkunci()
+        TextButton(
+            onClick = onBuka,
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+        ) {
+            Text(
+                text = "Buka",
+                style = MaterialTheme.typography.labelMedium,
+                color = WarnaArsip.Amber,
             )
         }
     }
@@ -376,7 +482,7 @@ private fun DaftarKisi(
     namaKoleksi: (KunciKoleksi) -> String?,
     status: (BerkasArsipEntity) -> com.arsipsenja.util.StatusLokal,
     onMintaThumbnail: (BerkasArsipEntity) -> Unit,
-    onBuka: (String) -> Unit,
+    onBuka: (BerkasArsipEntity) -> Unit,
 ) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(2),
@@ -392,7 +498,7 @@ private fun DaftarKisi(
                 namaKoleksi = namaKoleksi(KunciKoleksi(berkas.chatId, berkas.topicId)),
                 statusLokal = status(berkas),
                 onMintaThumbnail = onMintaThumbnail,
-                onClick = { onBuka(berkas.id) },
+                onClick = { onBuka(berkas) },
             )
         }
     }
@@ -404,7 +510,7 @@ private fun DaftarBaris(
     namaKoleksi: (KunciKoleksi) -> String?,
     status: (BerkasArsipEntity) -> com.arsipsenja.util.StatusLokal,
     onMintaThumbnail: (BerkasArsipEntity) -> Unit,
-    onBuka: (String) -> Unit,
+    onBuka: (BerkasArsipEntity) -> Unit,
 ) {
     LazyColumn(
         contentPadding = PaddingValues(bottom = 24.dp),
@@ -417,7 +523,7 @@ private fun DaftarBaris(
                 namaKoleksi = namaKoleksi(KunciKoleksi(berkas.chatId, berkas.topicId)),
                 statusLokal = status(berkas),
                 onMintaThumbnail = onMintaThumbnail,
-                onClick = { onBuka(berkas.id) },
+                onClick = { onBuka(berkas) },
             )
         }
     }
@@ -594,13 +700,49 @@ private fun LembarKoleksi(
     var tipeBaru by remember { mutableStateOf(TipeFile.entries.toSet()) }
     var diedit by remember { mutableStateOf<KoleksiEntity?>(null) }
 
-    fun buatLaluReset() {
-        vm.buatKoleksi(namaBaru, deskripsiBaru, labelBaru, warnaBaru, tipeBaru)
+    // Bagian kunci koleksi (default mati). State milik sheet sehingga data
+    // TIDAK hilang bila pembuatan gagal — user tinggal tekan coba lagi.
+    var kunciAktif by remember { mutableStateOf(false) }
+    var kunciTipe by remember { mutableStateOf(TipeKunci.TIDAK_ADA) }
+    var kunciRahasia by remember { mutableStateOf("") }
+    var kunciKonfirmasi by remember { mutableStateOf("") }
+    var kunciPola by remember { mutableStateOf(emptyList<Int>()) }
+    var kunciPolaUlang by remember { mutableStateOf(emptyList<Int>()) }
+    var kunciBio by remember { mutableStateOf(false) }
+    var galatKunci by remember { mutableStateOf<String?>(null) }
+
+    val konteks = LocalContext.current
+    val dukungBio = remember { perangkatDukungBiometrik(konteks) }
+    val pesanKelola by vm.pesan.collectAsState()
+    val tawarkanVault by vm.tawarkanVaultBaru.collectAsState()
+
+    fun aturUlangForm() {
         namaBaru = ""
         deskripsiBaru = ""
         labelBaru = ""
         warnaBaru = 0
         tipeBaru = TipeFile.entries.toSet()
+        kunciAktif = false
+        kunciTipe = TipeKunci.TIDAK_ADA
+        kunciRahasia = ""
+        kunciKonfirmasi = ""
+        kunciPola = emptyList()
+        kunciPolaUlang = emptyList()
+        kunciBio = false
+        galatKunci = null
+    }
+
+    /** Validasi kunci dulu, lalu kirim; reset HANYA bila sukses (via callback). */
+    fun buatLaluResetBilaSukses() {
+        if (namaBaru.isBlank()) return
+        galatKunci = KunciRahasia.validasiFormulir(
+            kunciAktif, kunciTipe, kunciRahasia, kunciKonfirmasi, kunciPola, kunciPolaUlang,
+        )
+        if (galatKunci != null) return
+        val kunci = KunciRahasia.rangkai(kunciAktif, kunciTipe, kunciRahasia, kunciPola, kunciBio)
+        vm.buatKoleksi(namaBaru, deskripsiBaru, labelBaru, warnaBaru, tipeBaru, kunci) {
+            aturUlangForm()
+        }
     }
 
     ModalBottomSheet(
@@ -644,8 +786,9 @@ private fun LembarKoleksi(
             }
             Spacer(Modifier.height(6.dp))
             Text(
-                text = "Setiap koleksi dibuat sebagai topik di vault Telegram — " +
-                    "rak arsip yang bisa kamu namai sendiri.",
+                text = "Koleksi = satu rak (topik) di dalam vault. Vault = grup " +
+                    "Telegram tempat semua koleksi disimpan; aplikasi menyiapkannya " +
+                    "otomatis, kamu tidak perlu mengaturnya.",
                 style = MaterialTheme.typography.bodySmall,
                 color = WarnaArsip.Tinta2,
             )
@@ -672,7 +815,7 @@ private fun LembarKoleksi(
                 onUbah = { labelBaru = it.take(24) },
                 tempat = "PENTING",
                 imeAction = androidx.compose.ui.text.input.ImeAction.Done,
-                onKirim = { buatLaluReset() },
+                onKirim = { buatLaluResetBilaSukses() },
             )
 
             Spacer(Modifier.height(12.dp))
@@ -693,13 +836,51 @@ private fun LembarKoleksi(
             Spacer(Modifier.height(8.dp))
             PemilihTipeKategori(tipeTerpilih = tipeBaru, onUbah = { tipeBaru = it })
 
+            Spacer(Modifier.height(12.dp))
+            BagianKunciBaru(
+                diaktifkan = kunciAktif,
+                onAktif = { kunciAktif = it },
+                tipe = kunciTipe,
+                onTipe = { kunciTipe = it },
+                rahasia = kunciRahasia,
+                onRahasia = { kunciRahasia = it },
+                konfirmasi = kunciKonfirmasi,
+                onKonfirmasi = { kunciKonfirmasi = it },
+                pola = kunciPola,
+                onPola = { kunciPola = it },
+                polaUlang = kunciPolaUlang,
+                onPolaUlang = { kunciPolaUlang = it },
+                biometrik = kunciBio,
+                onBiometrik = { kunciBio = it },
+                tampilBiometrik = dukungBio,
+                galat = galatKunci,
+            )
+
             Spacer(Modifier.height(16.dp))
             TombolUtama(
                 teks = "Buat koleksi",
                 ikon = ArsipIcons.Plus,
                 aktif = namaBaru.isNotBlank(),
-                onClick = { buatLaluReset() },
+                onClick = { buatLaluResetBilaSukses() },
             )
+
+            val galatBuat = pesanKelola?.takeIf { it.contains("gagal", ignoreCase = true) }
+            if (galatBuat != null) {
+                Spacer(Modifier.height(10.dp))
+                BilahPesan(
+                    pesan = galatBuat,
+                    nada = NadaPesan.SALAH,
+                    onTutup = vm::habiskanPesan,
+                )
+                if (tawarkanVault) {
+                    Spacer(Modifier.height(8.dp))
+                    TombolCadangan(
+                        teks = "Buat vault baru & coba lagi",
+                        ikon = ArsipIcons.Plus,
+                        onClick = vm::buatVaultBaruDanCobaLagi,
+                    )
+                }
+            }
 
             Spacer(Modifier.height(20.dp))
 
@@ -748,6 +929,9 @@ private fun LembarKoleksi(
                 vm.hapusKoleksi(k.kunci, tinggalkanChannel = false)
                 diedit = null
             },
+            onUbahKunci = { lama, baru ->
+                vm.aturKunci(k.kunci, lama, baru)
+            },
             onTutup = { diedit = null },
         )
     }
@@ -794,6 +978,10 @@ private fun BarisKoleksi(
                         maxLines = 1,
                     )
                 }
+                if (koleksi.terkunci) {
+                    Spacer(Modifier.width(6.dp))
+                    LencanaTerkunci()
+                }
             }
             Text(
                 text = "${koleksi.jumlahBerkas} berkas" +
@@ -820,6 +1008,7 @@ private fun DialogUbahKoleksi(
     koleksi: KoleksiEntity,
     onSimpan: (String, String, String, Int, Set<TipeFile>) -> Unit,
     onHapus: () -> Unit,
+    onUbahKunci: (String?, KunciBaru?) -> Unit,
     onTutup: () -> Unit,
 ) {
     var nama by remember { mutableStateOf(koleksi.nama) }
@@ -827,6 +1016,48 @@ private fun DialogUbahKoleksi(
     var label by remember { mutableStateOf(koleksi.label.orEmpty()) }
     var warna by remember { mutableStateOf(koleksi.warna) }
     var tipe by remember { mutableStateOf(koleksi.tipeDitangani) }
+
+    // Kelola kunci: ubah/hapus wajib memasukkan kunci lama dulu bila terkunci.
+    val tipeLama = remember(koleksi.kunci) {
+        runCatching { TipeKunci.valueOf(koleksi.kunciTipe) }
+            .getOrDefault(TipeKunci.TIDAK_ADA)
+    }
+    var kunciLama by remember { mutableStateOf("") }
+    var polaLama by remember { mutableStateOf(emptyList<Int>()) }
+    var kunciAktif by remember { mutableStateOf(false) }
+    var kunciTipe by remember { mutableStateOf(TipeKunci.TIDAK_ADA) }
+    var kunciRahasia by remember { mutableStateOf("") }
+    var kunciKonfirmasi by remember { mutableStateOf("") }
+    var kunciPola by remember { mutableStateOf(emptyList<Int>()) }
+    var kunciPolaUlang by remember { mutableStateOf(emptyList<Int>()) }
+    var kunciBio by remember { mutableStateOf(false) }
+    var galatKunci by remember { mutableStateOf<String?>(null) }
+    val konteks = LocalContext.current
+    val dukungBio = remember { perangkatDukungBiometrik(konteks) }
+
+    /** Rahasia lama sesuai tipe kunci yang sedang dipasang. */
+    fun rahasiaLama(): String =
+        if (tipeLama == TipeKunci.POLA) KunciRahasia.polaKeRahasia(polaLama) else kunciLama
+
+    fun kirimUbahKunci(hapus: Boolean) {
+        if (koleksi.terkunci && rahasiaLama().isEmpty()) {
+            galatKunci = "Masukkan kunci lama dulu."
+            return
+        }
+        if (hapus) {
+            galatKunci = null
+            onUbahKunci(rahasiaLama().ifBlank { null }, null)
+            return
+        }
+        galatKunci = KunciRahasia.validasiFormulir(
+            kunciAktif, kunciTipe, kunciRahasia, kunciKonfirmasi, kunciPola, kunciPolaUlang,
+        )
+        if (galatKunci != null) return
+        onUbahKunci(
+            rahasiaLama().ifBlank { null },
+            KunciRahasia.rangkai(kunciAktif, kunciTipe, kunciRahasia, kunciPola, kunciBio),
+        )
+    }
 
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onTutup,
@@ -871,6 +1102,92 @@ private fun DialogUbahKoleksi(
                 )
                 Spacer(Modifier.height(6.dp))
                 PemilihTipeKategori(tipeTerpilih = tipe, onUbah = { tipe = it })
+
+                Spacer(Modifier.height(14.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "Kunci koleksi",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = WarnaArsip.Tinta,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    if (koleksi.terkunci) {
+                        LencanaTerkunci()
+                    } else {
+                        Text(
+                            text = "Tidak dikunci",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = WarnaArsip.Tinta3,
+                        )
+                    }
+                }
+                if (koleksi.terkunci) {
+                    Spacer(Modifier.height(8.dp))
+                    if (tipeLama == TipeKunci.POLA) {
+                        Text(
+                            text = "Kunci lama (gambar polamu)",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = WarnaArsip.Tinta2,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            com.arsipsenja.ui.components.PapanPola(
+                                titik = polaLama,
+                                onUbah = { polaLama = it },
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            TextButton(onClick = { polaLama = emptyList() }) {
+                                Text("Hapus", color = WarnaArsip.Tinta2)
+                            }
+                        }
+                    } else {
+                        com.arsipsenja.ui.components.KolomIsian(
+                            label = "Kunci lama",
+                            nilai = kunciLama,
+                            onUbah = { kunciLama = it },
+                            tempat = if (tipeLama == TipeKunci.PIN) "••••" else "Kunci lama",
+                            sandi = true,
+                            keyboardType = if (tipeLama == TipeKunci.PIN) {
+                                androidx.compose.ui.text.input.KeyboardType.NumberPassword
+                            } else {
+                                androidx.compose.ui.text.input.KeyboardType.Text
+                            },
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                BagianKunciBaru(
+                    diaktifkan = kunciAktif,
+                    onAktif = { kunciAktif = it },
+                    tipe = kunciTipe,
+                    onTipe = { kunciTipe = it },
+                    rahasia = kunciRahasia,
+                    onRahasia = { kunciRahasia = it },
+                    konfirmasi = kunciKonfirmasi,
+                    onKonfirmasi = { kunciKonfirmasi = it },
+                    pola = kunciPola,
+                    onPola = { kunciPola = it },
+                    polaUlang = kunciPolaUlang,
+                    onPolaUlang = { kunciPolaUlang = it },
+                    biometrik = kunciBio,
+                    onBiometrik = { kunciBio = it },
+                    tampilBiometrik = dukungBio,
+                    galat = galatKunci,
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = { kirimUbahKunci(hapus = false) }) {
+                        Text(
+                            text = if (koleksi.terkunci) "Ubah kunci" else "Pasang kunci",
+                            color = WarnaArsip.Amber,
+                        )
+                    }
+                    if (koleksi.terkunci) {
+                        TextButton(onClick = { kirimUbahKunci(hapus = true) }) {
+                            Text("Hapus kunci", color = WarnaArsip.Bahaya)
+                        }
+                    }
+                }
             }
         },
         confirmButton = {

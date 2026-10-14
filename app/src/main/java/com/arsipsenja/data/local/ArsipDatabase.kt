@@ -72,9 +72,27 @@ val MIGRASI_2_3 = object : Migration(2, 3) {
     }
 }
 
+/**
+ * Migrasi 3 -> 4: kunci pengaman per koleksi (gerbang privasi lokal).
+ *
+ * - `koleksi.kunciTipe`: TIDAK_ADA / PIN / KATA_SANDI / POLA.
+ * - `koleksi.kunciGaram` / `kunciHash`: null bila tidak terkunci.
+ * - `koleksi.kunciBiometrik`: 0/1, boleh dibuka pakai biometrik.
+ *
+ * Kolom lain tidak disentuh; seluruh data pengguna dipertahankan.
+ */
+val MIGRASI_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `koleksi` ADD COLUMN `kunciTipe` TEXT NOT NULL DEFAULT 'TIDAK_ADA'")
+        db.execSQL("ALTER TABLE `koleksi` ADD COLUMN `kunciGaram` TEXT")
+        db.execSQL("ALTER TABLE `koleksi` ADD COLUMN `kunciHash` TEXT")
+        db.execSQL("ALTER TABLE `koleksi` ADD COLUMN `kunciBiometrik` INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
 @Database(
     entities = [BerkasArsipEntity::class, KoleksiEntity::class, TautanEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 abstract class ArsipDatabase : RoomDatabase() {
@@ -94,7 +112,7 @@ abstract class ArsipDatabase : RoomDatabase() {
                     ArsipDatabase::class.java,
                     "arsip-senja.db",
                 )
-                    .addMigrations(MIGRASI_1_2, MIGRASI_2_3)
+                    .addMigrations(MIGRASI_1_2, MIGRASI_2_3, MIGRASI_3_4)
                     // Indeks arsip selalu bisa dibangun ulang dari Telegram.
                     .fallbackToDestructiveMigration()
                     .build()

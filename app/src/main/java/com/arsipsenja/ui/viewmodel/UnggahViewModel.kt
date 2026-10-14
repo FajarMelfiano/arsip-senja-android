@@ -81,6 +81,29 @@ class UnggahViewModel(
         _koleksiTerpilih.value = kunci
     }
 
+    /** Koleksi yang sudah dibuka sesi ini (untuk gating unggah). */
+    val koleksiTerbuka: StateFlow<Set<KunciKoleksi>> = repo.koleksiTerbuka
+
+    /** True bila koleksi terkunci DAN belum dibuka sesi ini. */
+    fun perluBukaKunci(entitas: KoleksiEntity?): Boolean = repo.perluBukaKunci(entitas)
+
+    /** Coba buka dengan rahasia; hasil lewat [panggilBalik] (true = cocok). */
+    fun bukaKunci(kunci: KunciKoleksi, rahasia: String, panggilBalik: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val cocok = try {
+                repo.bukaKunci(kunci, rahasia)
+            } catch (_: Exception) {
+                false
+            }
+            panggilBalik(cocok)
+        }
+    }
+
+    /** Tandai terbuka setelah BiometricPrompt sukses di UI. */
+    fun bukaKunciBiometrik(kunci: KunciKoleksi) {
+        repo.bukaKunciBiometrik(kunci)
+    }
+
     fun setRuteOtomatis(aktif: Boolean) {
         _ruteOtomatis.value = aktif
     }
@@ -98,16 +121,30 @@ class UnggahViewModel(
         viewModelScope.launch {
             try {
                 if (_ruteOtomatis.value) {
-                    val hasil = repo.unggahOtomatis(uris)
+                    // Koleksi terkunci yang belum dibuka dilewati otomatis.
+                    val terkunci = koleksi.value
+                        .filter { perluBukaKunci(it) }
+                        .map { it.kunci }
+                        .toSet()
+                    val hasil = repo.unggahOtomatis(uris, terkunci)
                     _pesan.value = if (hasil.size == 1) {
                         "${uris.size} berkas dirutekan otomatis ke kategori."
                     } else {
                         "${uris.size} berkas dirutekan otomatis ke ${hasil.size} kategori."
+                    } + if (terkunci.isNotEmpty()) {
+                        " (${terkunci.size} koleksi terkunci dilewati.)"
+                    } else {
+                        ""
                     }
                 } else {
                     val tujuan = _koleksiTerpilih.value
                     if (tujuan == null) {
                         _pesan.value = "Pilih koleksi tujuan terlebih dahulu."
+                        return@launch
+                    }
+                    val entitas = koleksi.value.firstOrNull { it.kunci == tujuan }
+                    if (perluBukaKunci(entitas)) {
+                        _pesan.value = "Koleksi \"${entitas?.nama ?: "tujuan"}\" terkunci — buka dulu kuncinya."
                         return@launch
                     }
                     repo.mulaiUnggah(uris, tujuan)

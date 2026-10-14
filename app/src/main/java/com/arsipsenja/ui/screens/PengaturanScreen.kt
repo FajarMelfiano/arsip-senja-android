@@ -91,7 +91,9 @@ fun PengaturanScreen() {
     val kandidatVault by vm.kandidatVault.collectAsState()
     val memuatVault by vm.memuatVault.collectAsState()
     val pesanVault by vm.pesanVault.collectAsState()
-    val namaVaultAktif = kandidatVault.firstOrNull { it.chatId == vaultAktif }?.nama
+    val infoVault by vm.infoVault.collectAsState()
+    val namaVaultAktif = infoVault?.nama
+        ?: kandidatVault.firstOrNull { it.chatId == vaultAktif }?.nama
         ?: if (vaultAktif != null) "Grup ${vaultAktif}" else "Belum dipilih"
 
     Column(
@@ -220,10 +222,59 @@ fun PengaturanScreen() {
 
         BarisLabel("Vault aktif", namaVaultAktif)
         Spacer(Modifier.height(6.dp))
+        // Status kesehatan vault: nama grup + Forum siap/Bermasalah + Perbaiki.
+        val siap = infoVault?.forumSiap == true
+        val adaVault = vaultAktif != null
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            androidx.compose.foundation.layout.Box(
+                modifier = Modifier
+                    .size(9.dp)
+                    .clip(androidx.compose.foundation.shape.CircleShape)
+                    .background(
+                        when {
+                            !adaVault -> WarnaArsip.Tinta3
+                            siap -> WarnaArsip.Sukses
+                            else -> WarnaArsip.Bahaya
+                        },
+                    ),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = when {
+                    !adaVault -> "Belum ada vault"
+                    siap -> "Forum siap"
+                    else -> "Bermasalah"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = when {
+                    !adaVault -> WarnaArsip.Tinta3
+                    siap -> WarnaArsip.Sukses
+                    else -> WarnaArsip.Bahaya
+                },
+                modifier = Modifier.weight(1f),
+            )
+            if (adaVault && !siap) {
+                TextButton(onClick = vm::perbaikiVault, enabled = !memuatVault) {
+                    Text(
+                        text = "Perbaiki",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = WarnaArsip.Amber,
+                    )
+                }
+            }
+        }
+        if (infoVault?.masalah != null && adaVault && !siap) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = infoVault?.masalah.orEmpty(),
+                style = MaterialTheme.typography.bodySmall,
+                color = WarnaArsip.Tinta3,
+            )
+        }
+        Spacer(Modifier.height(6.dp))
         Text(
-            text = "Vault adalah grup Telegram tempat semua koleksi disimpan sebagai topik; " +
-                "tiap berkas yang diunggah disimpan sebagai pesan di dalam topik koleksinya. " +
-                "Tanpa vault yang sah, koleksi tidak bisa dibuat.",
+            text = "Vault = grup penyimpanan; koleksi = topik di dalamnya. Aplikasi " +
+                "menyiapkan vault otomatis saat kamu membuat koleksi.",
             style = MaterialTheme.typography.bodySmall,
             color = WarnaArsip.Tinta3,
         )

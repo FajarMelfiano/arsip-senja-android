@@ -62,13 +62,25 @@ class PengaturanViewModel(
     private val _pesanVault = MutableStateFlow<String?>(null)
     val pesanVault: StateFlow<String?> = _pesanVault.asStateFlow()
 
+    /** Nama grup + status kesehatan vault aktif (nama via GetChat). */
+    private val _infoVault = MutableStateFlow<ArsipRepository.InfoVault?>(null)
+    val infoVault: StateFlow<ArsipRepository.InfoVault?> = _infoVault.asStateFlow()
+
     init {
         muatVaultAktif()
+        muatInfoVault()
     }
 
     fun muatVaultAktif() {
         viewModelScope.launch {
             _vaultAktif.value = runCatching { repo.vaultTerpilih() }.getOrNull()
+        }
+    }
+
+    /** Muat ulang nama + status kesehatan vault aktif. */
+    fun muatInfoVault() {
+        viewModelScope.launch {
+            _infoVault.value = runCatching { repo.infoVaultAktif() }.getOrNull()
         }
     }
 
@@ -97,8 +109,30 @@ class PengaturanViewModel(
                 } else {
                     "Vault diganti. Koleksi baru akan dibuat sebagai topik di grup ini."
                 }
+                muatInfoVault()
             } catch (e: Exception) {
                 _pesanVault.value = "Gagal memilih vault: ${e.message}"
+            } finally {
+                _memuatVault.value = false
+            }
+        }
+    }
+
+    /** Satu ketukan "Perbaiki": validasi + aktivasi forum vault aktif, lalu refresh. */
+    fun perbaikiVault() {
+        viewModelScope.launch {
+            _memuatVault.value = true
+            try {
+                val info = repo.perbaikiVaultAktif()
+                _vaultAktif.value = info.chatId
+                _infoVault.value = info
+                _pesanVault.value = if (info.forumSiap) {
+                    "Vault \"${info.nama}\" sudah forum dan siap dipakai."
+                } else {
+                    "Vault belum siap: ${info.masalah ?: "periksa lagi nanti."}"
+                }
+            } catch (e: Exception) {
+                _pesanVault.value = "Gagal memperbaiki vault: ${e.message}"
             } finally {
                 _memuatVault.value = false
             }
@@ -113,6 +147,7 @@ class PengaturanViewModel(
                 val chatId = repo.buatVaultBaru(bersih)
                 _vaultAktif.value = chatId
                 _pesanVault.value = "Vault \"$bersih\" dibuat dan dijadikan aktif."
+                muatInfoVault()
             } catch (e: Exception) {
                 _pesanVault.value = "Gagal membuat vault: ${e.message}"
             } finally {
