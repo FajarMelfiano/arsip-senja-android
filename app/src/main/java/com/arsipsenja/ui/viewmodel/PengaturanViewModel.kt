@@ -88,12 +88,19 @@ class PengaturanViewModel(
 
     fun pilihVault(chatId: Long) {
         viewModelScope.launch {
+            _memuatVault.value = true
             try {
-                repo.pilihVault(chatId)
+                val forumBaru = repo.pilihVault(chatId)
                 _vaultAktif.value = chatId
-                _pesanVault.value = "Vault diganti. Koleksi baru akan dibuat sebagai topik di grup ini."
+                _pesanVault.value = if (forumBaru) {
+                    "Mode forum diaktifkan di grup ini. Koleksi baru akan dibuat sebagai topik."
+                } else {
+                    "Vault diganti. Koleksi baru akan dibuat sebagai topik di grup ini."
+                }
             } catch (e: Exception) {
                 _pesanVault.value = "Gagal memilih vault: ${e.message}"
+            } finally {
+                _memuatVault.value = false
             }
         }
     }

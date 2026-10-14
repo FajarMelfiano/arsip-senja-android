@@ -3,6 +3,8 @@
 package com.arsipsenja.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -39,6 +41,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.window.Dialog
 import com.arsipsenja.data.local.KunciKoleksi
+import com.arsipsenja.util.TipeFile
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -47,6 +50,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.arsipsenja.data.local.BerkasArsipEntity
 import com.arsipsenja.data.local.KoleksiEntity
@@ -585,7 +589,19 @@ private fun LembarKoleksi(
 ) {
     var namaBaru by remember { mutableStateOf("") }
     var deskripsiBaru by remember { mutableStateOf("") }
+    var labelBaru by remember { mutableStateOf("") }
+    var warnaBaru by remember { mutableStateOf(0) }
+    var tipeBaru by remember { mutableStateOf(TipeFile.entries.toSet()) }
     var diedit by remember { mutableStateOf<KoleksiEntity?>(null) }
+
+    fun buatLaluReset() {
+        vm.buatKoleksi(namaBaru, deskripsiBaru, labelBaru, warnaBaru, tipeBaru)
+        namaBaru = ""
+        deskripsiBaru = ""
+        labelBaru = ""
+        warnaBaru = 0
+        tipeBaru = TipeFile.entries.toSet()
+    }
 
     ModalBottomSheet(
         onDismissRequest = onTutup,
@@ -648,23 +664,41 @@ private fun LembarKoleksi(
                 nilai = deskripsiBaru,
                 onUbah = { deskripsiBaru = it },
                 tempat = "Foto, surat, dan catatan perjalanan",
-                imeAction = androidx.compose.ui.text.input.ImeAction.Done,
-                onKirim = {
-                    vm.buatKoleksi(namaBaru, deskripsiBaru)
-                    namaBaru = ""
-                    deskripsiBaru = ""
-                },
             )
+            Spacer(Modifier.height(10.dp))
+            com.arsipsenja.ui.components.KolomIsian(
+                label = "Label (opsional, maks 24)",
+                nilai = labelBaru,
+                onUbah = { labelBaru = it.take(24) },
+                tempat = "PENTING",
+                imeAction = androidx.compose.ui.text.input.ImeAction.Done,
+                onKirim = { buatLaluReset() },
+            )
+
             Spacer(Modifier.height(12.dp))
+            Text(
+                text = "Warna kategori",
+                style = MaterialTheme.typography.labelMedium,
+                color = WarnaArsip.Tinta2,
+            )
+            Spacer(Modifier.height(8.dp))
+            PemilihWarnaKategori(warnaTerpilih = warnaBaru, onPilih = { warnaBaru = it })
+
+            Spacer(Modifier.height(12.dp))
+            Text(
+                text = "Tipe berkas untuk rute otomatis",
+                style = MaterialTheme.typography.labelMedium,
+                color = WarnaArsip.Tinta2,
+            )
+            Spacer(Modifier.height(8.dp))
+            PemilihTipeKategori(tipeTerpilih = tipeBaru, onUbah = { tipeBaru = it })
+
+            Spacer(Modifier.height(16.dp))
             TombolUtama(
                 teks = "Buat koleksi",
                 ikon = ArsipIcons.Plus,
                 aktif = namaBaru.isNotBlank(),
-                onClick = {
-                    vm.buatKoleksi(namaBaru, deskripsiBaru)
-                    namaBaru = ""
-                    deskripsiBaru = ""
-                },
+                onClick = { buatLaluReset() },
             )
 
             Spacer(Modifier.height(20.dp))
@@ -676,6 +710,9 @@ private fun LembarKoleksi(
                     color = WarnaArsip.Tinta,
                     modifier = Modifier.weight(1f),
                 )
+                TextButton(onClick = vm::perbaikiTopikHilang) {
+                    Text("Buatkan topik", color = WarnaArsip.Amber)
+                }
                 TextButton(onClick = vm::tarikDaftarKoleksi) {
                     Text("Tarik dari Telegram", color = WarnaArsip.Amber)
                 }
@@ -703,8 +740,8 @@ private fun LembarKoleksi(
     diedit?.let { k ->
         DialogUbahKoleksi(
             koleksi = k,
-            onSimpan = { nama, deskripsi ->
-                vm.ubahKoleksi(k.kunci, nama, deskripsi)
+            onSimpan = { nama, deskripsi, label, warna, tipe ->
+                vm.ubahKoleksi(k.kunci, nama, deskripsi, label, warna, tipe)
                 diedit = null
             },
             onHapus = {
@@ -732,20 +769,36 @@ private fun BarisKoleksi(
         Icon(
             imageVector = ArsipIcons.Folder,
             contentDescription = null,
-            tint = WarnaArsip.VioletTerang,
+            tint = if (koleksi.warna != 0) Color(koleksi.warna) else WarnaArsip.VioletTerang,
             modifier = Modifier.size(16.dp),
         )
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
-            Text(
-                text = koleksi.nama,
-                style = MaterialTheme.typography.titleSmall,
-                color = WarnaArsip.Tinta,
-                maxLines = 1,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = koleksi.nama,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = WarnaArsip.Tinta,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                koleksi.label?.takeIf { it.isNotBlank() }?.let { l ->
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = l,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = WarnaArsip.AmberTerang,
+                        modifier = Modifier
+                            .background(WarnaArsip.AmberRedup, RoundedCornerShape(6.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                        maxLines = 1,
+                    )
+                }
+            }
             Text(
                 text = "${koleksi.jumlahBerkas} berkas" +
-                    (koleksi.deskripsi?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""),
+                    (koleksi.deskripsi?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: "") +
+                    " · ${ringkasanTipe(koleksi)}",
                 style = MaterialTheme.typography.bodySmall,
                 color = WarnaArsip.Tinta3,
                 maxLines = 1,
@@ -765,12 +818,15 @@ private fun BarisKoleksi(
 @Composable
 private fun DialogUbahKoleksi(
     koleksi: KoleksiEntity,
-    onSimpan: (String, String) -> Unit,
+    onSimpan: (String, String, String, Int, Set<TipeFile>) -> Unit,
     onHapus: () -> Unit,
     onTutup: () -> Unit,
 ) {
     var nama by remember { mutableStateOf(koleksi.nama) }
     var deskripsi by remember { mutableStateOf(koleksi.deskripsi.orEmpty()) }
+    var label by remember { mutableStateOf(koleksi.label.orEmpty()) }
+    var warna by remember { mutableStateOf(koleksi.warna) }
+    var tipe by remember { mutableStateOf(koleksi.tipeDitangani) }
 
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onTutup,
@@ -779,7 +835,9 @@ private fun DialogUbahKoleksi(
         textContentColor = WarnaArsip.Tinta2,
         title = { Text("Ubah koleksi") },
         text = {
-            Column {
+            Column(
+                Modifier.verticalScroll(rememberScrollState()),
+            ) {
                 com.arsipsenja.ui.components.KolomIsian(
                     label = "Nama",
                     nilai = nama,
@@ -791,11 +849,33 @@ private fun DialogUbahKoleksi(
                     nilai = deskripsi,
                     onUbah = { deskripsi = it },
                 )
+                Spacer(Modifier.height(10.dp))
+                com.arsipsenja.ui.components.KolomIsian(
+                    label = "Label (opsional, maks 24)",
+                    nilai = label,
+                    onUbah = { label = it.take(24) },
+                )
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = "Warna kategori",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = WarnaArsip.Tinta2,
+                )
+                Spacer(Modifier.height(6.dp))
+                PemilihWarnaKategori(warnaTerpilih = warna, onPilih = { warna = it })
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = "Tipe berkas untuk rute otomatis",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = WarnaArsip.Tinta2,
+                )
+                Spacer(Modifier.height(6.dp))
+                PemilihTipeKategori(tipeTerpilih = tipe, onUbah = { tipe = it })
             }
         },
         confirmButton = {
             TextButton(
-                onClick = { onSimpan(nama.trim(), deskripsi.trim()) },
+                onClick = { onSimpan(nama.trim(), deskripsi.trim(), label.trim(), warna, tipe) },
                 enabled = nama.isNotBlank(),
             ) {
                 Text("Simpan", color = WarnaArsip.Amber)
@@ -812,4 +892,94 @@ private fun DialogUbahKoleksi(
             }
         },
     )
+}
+
+/** Delapan preset warna kategori; 0 = warna bawaan tema. */
+private val WarnaKategori = listOf(
+    0xFFE8A33D.toInt(),
+    0xFFA48AE0.toInt(),
+    0xFF6FBF9B.toInt(),
+    0xFFE2695F.toInt(),
+    0xFF7FB3E8.toInt(),
+    0xFFE88FB1.toInt(),
+    0xFF7FD4C1.toInt(),
+    0xFFF2ECDF.toInt(),
+)
+
+@Composable
+private fun PemilihWarnaKategori(warnaTerpilih: Int, onPilih: (Int) -> Unit) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SwatchKategori(
+            warna = null,
+            terpilih = warnaTerpilih == 0,
+            onPilih = { onPilih(0) },
+        )
+        WarnaKategori.forEach { w ->
+            SwatchKategori(
+                warna = w,
+                terpilih = warnaTerpilih == w,
+                onPilih = { onPilih(w) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun SwatchKategori(warna: Int?, terpilih: Boolean, onPilih: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(30.dp)
+            .clip(androidx.compose.foundation.shape.CircleShape)
+            .then(
+                if (warna == null) Modifier.background(WarnaArsip.GarisKuat)
+                else Modifier.background(Color(warna)),
+            )
+            .then(
+                if (terpilih) Modifier.border(2.dp, WarnaArsip.Amber, androidx.compose.foundation.shape.CircleShape)
+                else Modifier,
+            )
+            .clickable(onClick = onPilih),
+    )
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun PemilihTipeKategori(
+    tipeTerpilih: Set<TipeFile>,
+    onUbah: (Set<TipeFile>) -> Unit,
+) {
+    androidx.compose.foundation.layout.FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        TipeFile.entries.forEach { t ->
+            ChipArsip(
+                label = t.label,
+                terpilih = t in tipeTerpilih,
+                onClick = {
+                    onUbah(if (t in tipeTerpilih) tipeTerpilih - t else tipeTerpilih + t)
+                },
+            )
+        }
+    }
+    Spacer(Modifier.height(4.dp))
+    Text(
+        text = if (tipeTerpilih.isEmpty()) {
+            "Tidak ada yang dipilih = menerima semua tipe berkas."
+        } else {
+            "${tipeTerpilih.size} dari ${TipeFile.entries.size} tipe dipilih."
+        },
+        style = MaterialTheme.typography.bodySmall,
+        color = WarnaArsip.Tinta3,
+    )
+}
+
+/** Ringkasan tipe untuk baris koleksi: "Semua tipe" atau "Gambar, Video". */
+private fun ringkasanTipe(koleksi: KoleksiEntity): String {
+    val semua = TipeFile.entries.toSet()
+    return if (koleksi.tipeDitangani == semua) "Semua tipe"
+    else koleksi.tipeDitangani.sortedBy { it.ordinal }.joinToString(", ") { it.label }
 }

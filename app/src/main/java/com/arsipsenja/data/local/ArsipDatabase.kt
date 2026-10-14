@@ -56,9 +56,25 @@ val MIGRASI_1_2 = object : Migration(1, 2) {
     }
 }
 
+/**
+ * Migrasi 2 -> 3: metadata kategori kustom.
+ *
+ * - `koleksi.label`: chip label opsional (maks 24 karakter), null bila kosong.
+ * - `koleksi.warna`: ARGB untuk dot/chip kategori, default 0 (warna tema).
+ * - `koleksi.tipeFile`: CSV nama enum TipeFile untuk rute otomatis;
+ *   string kosong = menangani semua tipe (kompatibel data lama).
+ */
+val MIGRASI_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `koleksi` ADD COLUMN `label` TEXT")
+        db.execSQL("ALTER TABLE `koleksi` ADD COLUMN `warna` INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE `koleksi` ADD COLUMN `tipeFile` TEXT NOT NULL DEFAULT ''")
+    }
+}
+
 @Database(
     entities = [BerkasArsipEntity::class, KoleksiEntity::class, TautanEntity::class],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class ArsipDatabase : RoomDatabase() {
@@ -78,7 +94,7 @@ abstract class ArsipDatabase : RoomDatabase() {
                     ArsipDatabase::class.java,
                     "arsip-senja.db",
                 )
-                    .addMigrations(MIGRASI_1_2)
+                    .addMigrations(MIGRASI_1_2, MIGRASI_2_3)
                     // Indeks arsip selalu bisa dibangun ulang dari Telegram.
                     .fallbackToDestructiveMigration()
                     .build()

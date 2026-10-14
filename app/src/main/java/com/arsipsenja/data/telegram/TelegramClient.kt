@@ -458,6 +458,32 @@ class TelegramClient(
             },
         )
 
+    /**
+     * Aktifkan mode forum pada supergroup lama (yang belum forum), agar bisa
+     * menampung topik. Membutuhkan hak pemilik grup.
+     *
+     * @throws TelegramException bila gagal (mis. bukan pemilik, atau grup
+     * diskusi yang memang tidak bisa jadi forum).
+     */
+    suspend fun aktifkanForum(chatId: Long) {
+        kirim(
+            TdApi.ToggleSupergroupIsForum().apply {
+                supergroupId = grupIdDariChat(chatId)
+                isForum = true
+                hasForumTabs = false
+            },
+        )
+    }
+
+    /**
+     * Ubah chatId supergroup (-100xxx) menjadi supergroupId (xxx) untuk API
+     * yang memakai identifier supergroup, mis. [ToggleSupergroupIsForum].
+     */
+    fun grupIdDariChat(chatId: Long): Long {
+        require(chatId <= -1_000_000_000_000L) { "Bukan chat supergroup: $chatId" }
+        return -chatId - 1_000_000_000_000L
+    }
+
     /** Seluruh topik forum di satu chat; paginasi ditangani otomatis. */
     suspend fun daftarTopik(chatId: Long): List<InfoTopik> {
         val hasil = mutableListOf<InfoTopik>()

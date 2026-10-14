@@ -22,6 +22,8 @@ import com.arsipsenja.data.telegram.keBerkasMentah
 import com.arsipsenja.data.telegram.keEntity
 import com.arsipsenja.data.work.DownloadWorker
 import com.arsipsenja.data.work.UploadWorker
+import com.arsipsenja.util.TipeFile
+import android.provider.OpenableColumns
 import java.util.UUID
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -103,9 +105,30 @@ class ArsipRepository(
 
     suspend fun vaultTerpilih(): Long? = pengaturan.vaultSekarang()
 
-    suspend fun pilihVault(chatId: Long) {
+    /**
+     * Pilih vault baru. Grup lama yang belum mode forum diaktifkan otomatis
+     * (membutuhkan hak pemilik grup) agar topik bisa dibuat.
+     *
+     * @return true bila mode forum baru saja diaktifkan untuk grup ini.
+     * @throws TelegramException bila aktivasi forum gagal.
+     */
+    suspend fun pilihVault(chatId: Long): Boolean {
+        val perluForum = try {
+            telegram.daftarTopik(chatId)
+            false
+        } catch (e: TelegramException) {
+            if (!bukanForum(e)) throw e
+            telegram.aktifkanForum(chatId)
+            true
+        }
         pengaturan.setVaultChatId(chatId)
+        return perluForum
     }
+
+    /** True bila galat TDLib berarti "chat ini bukan forum". */
+    private fun bukanForum(e: TelegramException): Boolean =
+        e.pesan.contains("forum", ignoreCase = true) ||
+            e.pesan.contains("CHAT_NOT_FORUM", ignoreCase = true)
 
     /** Buat grup vault forum baru dan langsung jadikan vault aktif. */
     suspend fun buatVaultBaru(nama: String = NAMA_VAULT_BAWAAN): Long {
@@ -231,17 +254,31 @@ class ArsipRepository(
     /**
      * Buat koleksi baru sebagai topik forum di vault. Vault dibuat otomatis
      * bila pengguna belum memilih. Topik yang sudah ada dipakai ulang.
+     *
+     * @param label chip label opsional (maks 24 karakter).
+     * @param warna ARGB untuk dot/chip kategori, 0 = warna tema.
+     * @param tipe himpunan tipe berkas untuk rute otomatis; kosong = semua tipe.
      */
-    suspend fun buatKoleksi(nama: String, deskripsi: String): KoleksiEntity {
+    suspend fun buatKoleksi(
+        nama: String,
+        deskripsi: String,
+        label: String = "",
+        warna: Int = 0,
+        tipe: Set<TipeFile> = emptySet(),
+    ): KoleksiEntity {
         val vault = pastikanVault()
         val topik = telegram.pastikanTopik(vault, nama.trim())
         val lama = koleksiDao.ambil(vault, topik.topicId)
         val sekarang = System.currentTimeMillis()
+        val labelBersih = label.trim().take(24).takeIf { it.isNotBlank() }
         val koleksi = KoleksiEntity(
             chatId = vault,
             topicId = topik.topicId,
             nama = topik.nama,
             deskripsi = deskripsi.trim().takeIf { it.isNotBlank() } ?: lama?.deskripsi,
+            label = labelBersih ?: lama?.label,
+            warna = warna.takeIf { it != 0 } ?: lama?.warna ?: 0,
+            tipeFile = if (tipe.isEmpty()) lama?.tipeFile ?: "" else tipe.joinToString(",") { it.name },
             jumlahBerkas = lama?.jumlahBerkas ?: 0,
             dibuatPada = lama?.dibuatPada ?: sekarang,
             terakhirSinkron = lama?.terakhirSinkron ?: sekarang,
@@ -250,7 +287,18 @@ class ArsipRepository(
         return koleksi
     }
 
-    suspend fun ubahKoleksi(kunci: KunciKoleksi, nama: String, deskripsi: String) {
+    /**
+     * Ubah metadata koleksi (nama, deskripsi, label, warna, tipe). Untuk
+     * topik, nama topik di Telegram ikut diubah.
+     */
+    suspend fun ubahKoleksi(
+        kunci: KunciKoleksi,
+        nama: String,
+        deskripsi: String,
+        label: String = "",
+        warna: Int = 0,
+        tipe: Set<TipeFile> = emptySet(),
+    ) {
         val namaBersih = nama.trim()
         require(namaBersih.isNotEmpty()) { "Nama koleksi kosong." }
         if (kunci.adalahTopik) {
@@ -264,6 +312,9 @@ class ArsipRepository(
             lama.copy(
                 nama = namaBersih,
                 deskripsi = deskripsi.trim().ifBlank { null },
+                label = label.trim().take(24).takeIf { it.isNotBlank() },
+                warna = warna,
+                tipeFile = tipe.joinToString(",") { it.name },
             ),
         )
     }
@@ -310,6 +361,59 @@ class ArsipRepository(
                 .build()
             workManager.enqueueUniqueWork(pekerjaan, ExistingWorkPolicy.APPEND_OR_REPLACE, permintaan)
         }
+    }
+
+    /**
+     * Antrekan unggah dengan rute otomatis: tiap berkas dideteksi tipenya,
+     * lalu dikirim ke kategori yang menangani tipe tersebut. Kategori yang
+     * paling spesifik (menangani tipe paling sedikit) dipilih bila beberapa
+     * cocok; kategori "semua tipe" dipakai bila tidak ada yang cocok.
+     *
+     * @return peta kunci koleksi → jumlah berkas yang dirutekan ke sana.
+     */
+    suspend fun unggahOtomatis(uris: List<Uri>): Map<KunciKoleksi, Int> {
+        require(uris.isNotEmpty()) { "Belum ada berkas yang dipilih." }
+        val daftar = koleksiDao.alirSemua().first()
+        require(daftar.isNotEmpty()) { "Buat kategori dulu di Kelola koleksi." }
+        val perKunci = mutableMapOf<KunciKoleksi, MutableList<Uri>>()
+        uris.forEach { uri ->
+            val target = pilihKategoriUntuk(deteksiTipe(uri), daftar)
+            perKunci.getOrPut(target.kunci) { mutableListOf() } += uri
+        }
+        perKunci.forEach { (kunci, daftarUri) -> mulaiUnggah(daftarUri, kunci) }
+        return perKunci.mapValues { it.value.size }
+    }
+
+    /**
+     * Periksa semua kategori topik dan buat ulang topik yang hilang di
+     * Telegram (mis. dihapus dari luar aplikasi).
+     *
+     * @return jumlah topik yang dibuat ulang.
+     */
+    suspend fun perbaikiTopikHilang(): Int {
+        val daftar = koleksiDao.alirSemua().first().filter { it.adalahTopik }
+        var diperbaiki = 0
+        daftar.forEach { k ->
+            val awal = k.kunci
+            if (pastikanTopikKoleksi(awal) != awal) diperbaiki++
+        }
+        return diperbaiki
+    }
+
+    /** Pilih kategori tujuan untuk [tipe]: yang paling spesifik menang. */
+    private fun pilihKategoriUntuk(tipe: TipeFile, daftar: List<KoleksiEntity>): KoleksiEntity =
+        daftar.filter { tipe in it.tipeDitangani }
+            .minByOrNull { it.tipeDitangani.size }
+            ?: daftar.first()
+
+    /** Deteksi tipe berkas dari MIME + nama berkas SAF. */
+    private fun deteksiTipe(uri: Uri): TipeFile {
+        val resolver = context.contentResolver
+        val mime = resolver.getType(uri)
+        val nama = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+            if (c.moveToFirst()) c.getString(0) else null
+        } ?: uri.lastPathSegment.orEmpty()
+        return TipeFile.dariMime(mime, nama)
     }
 
     /**

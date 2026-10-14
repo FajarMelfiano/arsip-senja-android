@@ -36,6 +36,10 @@ class UnggahViewModel(
     private val _koleksiTerpilih = MutableStateFlow<KunciKoleksi?>(null)
     val koleksiTerpilih: StateFlow<KunciKoleksi?> = _koleksiTerpilih.asStateFlow()
 
+    private val _ruteOtomatis = MutableStateFlow(false)
+    /** True: tiap berkas dirutekan ke kategori sesuai tipe berkasnya. */
+    val ruteOtomatis: StateFlow<Boolean> = _ruteOtomatis.asStateFlow()
+
     private val _pesan = MutableStateFlow<String?>(null)
     val pesan: StateFlow<String?> = _pesan.asStateFlow()
 
@@ -77,21 +81,38 @@ class UnggahViewModel(
         _koleksiTerpilih.value = kunci
     }
 
-    /** Antrekan URI SAF terpilih ke koleksi tujuan. */
+    fun setRuteOtomatis(aktif: Boolean) {
+        _ruteOtomatis.value = aktif
+    }
+
+    /**
+     * Antrekan URI SAF terpilih. Bila rute otomatis aktif, tiap berkas
+     * dideteksi tipenya dan dikirim ke kategori yang menanganinya;
+     * bila tidak, semuanya dikirim ke koleksi terpilih manual.
+     */
     fun mulaiUnggah(uris: List<android.net.Uri>) {
-        val tujuan = _koleksiTerpilih.value
-        if (tujuan == null) {
-            _pesan.value = "Pilih koleksi tujuan terlebih dahulu."
-            return
-        }
         if (uris.isEmpty()) {
             _pesan.value = "Belum ada berkas yang dipilih."
             return
         }
         viewModelScope.launch {
             try {
-                repo.mulaiUnggah(uris, tujuan)
-                _pesan.value = "${uris.size} berkas masuk antrean unggah."
+                if (_ruteOtomatis.value) {
+                    val hasil = repo.unggahOtomatis(uris)
+                    _pesan.value = if (hasil.size == 1) {
+                        "${uris.size} berkas dirutekan otomatis ke kategori."
+                    } else {
+                        "${uris.size} berkas dirutekan otomatis ke ${hasil.size} kategori."
+                    }
+                } else {
+                    val tujuan = _koleksiTerpilih.value
+                    if (tujuan == null) {
+                        _pesan.value = "Pilih koleksi tujuan terlebih dahulu."
+                        return@launch
+                    }
+                    repo.mulaiUnggah(uris, tujuan)
+                    _pesan.value = "${uris.size} berkas masuk antrean unggah."
+                }
             } catch (e: Exception) {
                 _pesan.value = "Gagal mengantre unggah: ${e.message}"
             }

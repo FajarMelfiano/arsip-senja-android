@@ -54,6 +54,7 @@ fun UnggahScreen() {
 
     val koleksi by vm.koleksi.collectAsState()
     val terpilih by vm.koleksiTerpilih.collectAsState()
+    val ruteOtomatis by vm.ruteOtomatis.collectAsState()
     val namaTerpilih by vm.namaKoleksiTerpilih.collectAsState()
     val antrean by vm.antrean.collectAsState()
     val transfer by vm.transfer.collectAsState()
@@ -103,26 +104,63 @@ fun UnggahScreen() {
                     "Koleksi tersimpan sebagai channel privat atau topik di vault Telegram.",
             )
         } else {
-            Text(
-                text = "Koleksi tujuan",
-                style = MaterialTheme.typography.labelMedium,
-                color = WarnaArsip.Tinta2,
-            )
-            Spacer(Modifier.height(8.dp))
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
             ) {
-                koleksi.forEach { k ->
-                    ChipArsip(
-                        label = k.nama,
-                        terpilih = terpilih == k.kunci,
-                        jumlah = k.jumlahBerkas,
-                        onClick = { vm.pilihKoleksi(k.kunci) },
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = "Rute otomatis (ikut kategori)",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = WarnaArsip.Tinta,
+                    )
+                    Text(
+                        text = "Tiap berkas dikirim ke kategori sesuai tipenya",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = WarnaArsip.Tinta3,
                     )
                 }
+                androidx.compose.material3.Switch(
+                    checked = ruteOtomatis,
+                    onCheckedChange = vm::setRuteOtomatis,
+                    colors = androidx.compose.material3.SwitchDefaults.colors(
+                        checkedThumbColor = WarnaArsip.Amber,
+                        checkedTrackColor = WarnaArsip.AmberRedup,
+                    ),
+                )
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            if (!ruteOtomatis) {
+                Text(
+                    text = "Koleksi tujuan",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = WarnaArsip.Tinta2,
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    koleksi.forEach { k ->
+                        ChipArsip(
+                            label = k.nama,
+                            terpilih = terpilih == k.kunci,
+                            jumlah = k.jumlahBerkas,
+                            onClick = { vm.pilihKoleksi(k.kunci) },
+                        )
+                    }
+                }
+            } else {
+                Text(
+                    text = "Kategori tujuan ditentukan otomatis dari tipe tiap berkas. " +
+                        "Atur tipe tiap kategori di Dasbor → Kelola koleksi.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = WarnaArsip.Tinta2,
+                )
             }
 
             Spacer(Modifier.height(16.dp))

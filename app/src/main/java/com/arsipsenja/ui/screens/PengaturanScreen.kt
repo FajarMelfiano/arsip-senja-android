@@ -453,8 +453,6 @@ private fun DialogPilihGrup(
     onPilih: (Long) -> Unit,
     onTutup: () -> Unit,
 ) {
-    var petunjuk by remember { mutableStateOf<String?>(null) }
-
     Dialog(onDismissRequest = onTutup) {
         Surface(
             shape = RoundedCornerShape(20.dp),
@@ -473,8 +471,8 @@ private fun DialogPilihGrup(
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = "Hanya grup berlabel Forum yang bisa dipakai langsung. " +
-                        "Aktifkan Topik di pengaturan grup Telegram dulu bila belum.",
+                    text = "Grup yang belum mode forum akan diaktifkan otomatis saat dipilih " +
+                        "(butuh hak pemilik grup).",
                     style = MaterialTheme.typography.bodySmall,
                     color = WarnaArsip.Tinta2,
                 )
@@ -507,26 +505,12 @@ private fun DialogPilihGrup(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(12.dp))
-                                    .clickable {
-                                        if (k.forumSiap) {
-                                            onPilih(k.chatId)
-                                        } else {
-                                            petunjuk = "\"${k.nama}\" belum mode forum — " +
-                                                "aktifkan Topik di pengaturan grup dulu."
-                                        }
-                                    }
+                                    .clickable { onPilih(k.chatId) }
                                     .padding(horizontal = 8.dp, vertical = 6.dp),
                             ) {
                                 RadioButton(
                                     selected = k.chatId == vaultAktif,
-                                    onClick = {
-                                        if (k.forumSiap) {
-                                            onPilih(k.chatId)
-                                        } else {
-                                            petunjuk = "\"${k.nama}\" belum mode forum — " +
-                                                "aktifkan Topik di pengaturan grup dulu."
-                                        }
-                                    },
+                                    onClick = { onPilih(k.chatId) },
                                     colors = RadioButtonDefaults.colors(
                                         selectedColor = WarnaArsip.Amber,
                                         unselectedColor = WarnaArsip.Tinta3,
@@ -541,24 +525,15 @@ private fun DialogPilihGrup(
                                     )
                                     Text(
                                         text = if (k.forumSiap) "Forum siap"
-                                        else "Belum mode forum",
+                                        else "Forum akan diaktifkan",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = if (k.forumSiap) WarnaArsip.Sukses
-                                        else WarnaArsip.Tinta3,
+                                        else WarnaArsip.AmberTerang,
                                     )
                                 }
                             }
                         }
                     }
-                }
-
-                petunjuk?.let { p ->
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = p,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = WarnaArsip.AmberTerang,
-                    )
                 }
 
                 Spacer(Modifier.height(12.dp))

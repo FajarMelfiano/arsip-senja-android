@@ -197,7 +197,13 @@ class DasborViewModel(
 
     // ---- Koleksi ----
 
-    fun buatKoleksi(nama: String, deskripsi: String) {
+    fun buatKoleksi(
+        nama: String,
+        deskripsi: String,
+        label: String = "",
+        warna: Int = 0,
+        tipe: Set<TipeFile> = emptySet(),
+    ) {
         if (nama.isBlank()) {
             _pesan.value = "Nama koleksi belum diisi."
             return
@@ -205,7 +211,7 @@ class DasborViewModel(
         viewModelScope.launch {
             _memuat.value = true
             try {
-                repo.buatKoleksi(nama.trim(), deskripsi.trim())
+                repo.buatKoleksi(nama.trim(), deskripsi.trim(), label, warna, tipe)
                 _pesan.value = "Koleksi \"$nama\" dibuat di Telegram."
             } catch (e: Exception) {
                 _pesan.value = "Gagal membuat koleksi: ${e.message}"
@@ -215,7 +221,14 @@ class DasborViewModel(
         }
     }
 
-    fun ubahKoleksi(kunci: KunciKoleksi, nama: String, deskripsi: String) {
+    fun ubahKoleksi(
+        kunci: KunciKoleksi,
+        nama: String,
+        deskripsi: String,
+        label: String = "",
+        warna: Int = 0,
+        tipe: Set<TipeFile> = emptySet(),
+    ) {
         if (nama.isBlank()) {
             _pesan.value = "Nama koleksi belum diisi."
             return
@@ -223,10 +236,29 @@ class DasborViewModel(
         viewModelScope.launch {
             _memuat.value = true
             try {
-                repo.ubahKoleksi(kunci, nama.trim(), deskripsi.trim())
+                repo.ubahKoleksi(kunci, nama.trim(), deskripsi.trim(), label, warna, tipe)
                 _pesan.value = "Koleksi diperbarui."
             } catch (e: Exception) {
                 _pesan.value = "Gagal memperbarui koleksi: ${e.message}"
+            } finally {
+                _memuat.value = false
+            }
+        }
+    }
+
+    /** Periksa semua kategori dan buat ulang topik yang hilang di Telegram. */
+    fun perbaikiTopikHilang() {
+        viewModelScope.launch {
+            _memuat.value = true
+            try {
+                val n = repo.perbaikiTopikHilang()
+                _pesan.value = if (n > 0) {
+                    "$n topik dibuat ulang di Telegram."
+                } else {
+                    "Semua topik kategori sudah ada di Telegram."
+                }
+            } catch (e: Exception) {
+                _pesan.value = "Gagal memeriksa topik: ${e.message}"
             } finally {
                 _memuat.value = false
             }
