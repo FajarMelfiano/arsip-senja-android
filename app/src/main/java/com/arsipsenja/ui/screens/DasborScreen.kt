@@ -70,7 +70,6 @@ import com.arsipsenja.ui.theme.Fraunces
 import com.arsipsenja.ui.theme.WarnaArsip
 import com.arsipsenja.ui.viewmodel.DasborViewModel
 import com.arsipsenja.util.TampilanDasbor
-import com.arsipsenja.util.TipeFile
 import com.arsipsenja.util.UrutBerkas
 import androidx.lifecycle.viewmodel.compose.viewModel
 
