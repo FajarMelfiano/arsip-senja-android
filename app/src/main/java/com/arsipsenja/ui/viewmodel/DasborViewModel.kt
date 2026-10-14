@@ -276,10 +276,15 @@ class DasborViewModel(
         viewModelScope.launch {
             _memuat.value = true
             try {
-                repo.buatVaultBaru()
+                val hasil = repo.buatVaultBaru()
                 repo.buatKoleksi(m.nama, m.deskripsi, m.label, m.warna, m.tipe, m.kunci)
                 _tawarkanVaultBaru.value = false
-                _pesan.value = "Vault baru dibuat; koleksi \"${m.nama}\" dibuat di Telegram."
+                _pesan.value = if (hasil.dibuatBaru) {
+                    "Vault baru dibuat; koleksi \"${m.nama}\" dibuat di Telegram."
+                } else {
+                    "Vault \"${hasil.nama}\" sudah ada, dipakai lagi; " +
+                        "koleksi \"${m.nama}\" dibuat di Telegram."
+                }
                 tundaBerhasil?.invoke()
                 tundaBerhasil = null
                 permintaanTerakhir = null

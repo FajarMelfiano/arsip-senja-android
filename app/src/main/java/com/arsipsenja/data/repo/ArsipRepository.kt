@@ -28,6 +28,7 @@ import com.arsipsenja.data.work.UploadWorker
 import com.arsipsenja.util.TipeFile
 import android.provider.OpenableColumns
 import java.util.UUID
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -165,18 +166,113 @@ class ArsipRepository(
     }
 
     /** Buat grup vault forum baru dan langsung jadikan vault aktif. */
-    suspend fun buatVaultBaru(nama: String = NAMA_VAULT_BAWAAN): Long {
+    suspend fun buatVaultBaru(nama: String = NAMA_VAULT_BAWAAN): HasilBuatVault {
+        // Dedupe: jangan buat duplikat bila grup milik sendiri forum-siap
+        // dengan nama yang sama sudah ada — pakai lagi grup itu.
+        // Bila deteksi gagal (mis. jaringan), jatuh ke pembuatan baru
+        // seperti perilaku lama.
+        val lama = runCatching { deteksiVaultMilikSendiri() }
+            .getOrNull()
+            ?.let { PenjagaVault.cariNamaSama(it.keCalon(), nama) }
+        if (lama != null) {
+            pengaturan.setVaultChatId(lama.chatId)
+            return HasilBuatVault(lama.chatId, dibuatBaru = false, nama = lama.nama)
+        }
         val chat = telegram.buatVault(nama)
         pengaturan.setVaultChatId(chat.id)
-        return chat.id
+        return HasilBuatVault(
+            chatId = chat.id,
+            dibuatBaru = true,
+            nama = chat.title.orEmpty().ifBlank { nama.trim() },
+        )
+    }
+
+    /** Hasil pembuatan vault: dibuat baru vs vault lama yang dipakai lagi. */
+    data class HasilBuatVault(
+        val chatId: Long,
+        val dibuatBaru: Boolean,
+        val nama: String,
+    )
+
+    /**
+     * Kembalikan vault aktif; bila pengguna belum pernah memilih, pakai
+     * dulu vault sehat milik sendiri yang sudah ada (aturan nama-cocok /
+     * satu-satunya) dan hanya buat grup baru bila tidak ada kandidat.
+     */
+    suspend fun pastikanVault(): Long {
+        pengaturan.vaultSekarang()?.let { return it }
+        val adopsi = runCatching { deteksiVaultMilikSendiri() }
+            .getOrNull()
+            ?.let { PenjagaVault.pilihAdopsi(it.keCalon(), NAMA_VAULT_BAWAAN) }
+        if (adopsi != null) {
+            pengaturan.setVaultChatId(adopsi.chatId)
+            return adopsi.chatId
+        }
+        return buatVaultBaru().chatId
+    }
+
+    /** Daftar supergroup milik sendiri yang forum-siap (topik bisa dibaca). */
+    suspend fun deteksiVaultMilikSendiri(): List<KandidatVault> {
+        return telegram.daftarSupergroup().mapNotNull { chat ->
+            try {
+                telegram.daftarTopik(chat.id)
+                KandidatVault(
+                    chatId = chat.id,
+                    nama = chat.title.orEmpty().ifBlank { "Grup ${chat.id}" },
+                    forumSiap = true,
+                )
+            } catch (e: Exception) {
+                Log.i(tag, "Grup ${chat.id} belum forum-siap, dilewati deteksi: ${e.message}")
+                null
+            }
+        }
+    }
+
+    /** Hasil pemeriksaan vault saat refresh Pengaturan. */
+    sealed interface HasilPeriksaVault {
+        /** Vault sah / tidak ada vault / adopsi diblokir: tidak ada aksi. */
+        data object TidakAdaAksi : HasilPeriksaVault
+
+        /** Vault rusak diganti otomatis dengan vault sehat milik sendiri. */
+        data class Diadopsi(val kandidat: KandidatVault) : HasilPeriksaVault
+
+        /** Beberapa kandidat siap pakai tanpa kecocokan nama: jangan menebak. */
+        data class BanyakKandidat(val jumlah: Int) : HasilPeriksaVault
     }
 
     /**
-     * Kembalikan vault aktif; buat otomatis bernama "Arsip Senja" bila
-     * pengguna belum pernah memilih.
+     * Periksa vault tersimpan dan adopsikan vault sehat milik sendiri bila
+     * vault lama TIDAK SAH (mis. channel) dan tidak dipakai koleksi
+     * bertopik. Dipanggil saat Pengaturan dibuka. GetChat yang gagal
+     * dilempar agar ViewModel menampilkan "Gagal memeriksa..." dan
+     * mempertahankan info lama, bukan menimpa dengan "Bermasalah".
      */
-    suspend fun pastikanVault(): Long =
-        pengaturan.vaultSekarang() ?: buatVaultBaru()
+    suspend fun periksaDanAdopsiVault(): HasilPeriksaVault {
+        val vault = pengaturan.vaultSekarang()
+            ?: return HasilPeriksaVault.TidakAdaAksi
+        val chat = telegram.ambilChat(vault)
+        if (telegram.adalahVaultSah(chat)) return HasilPeriksaVault.TidakAdaAksi
+        val topicIdDipakai = koleksiDao.alirSemua().first()
+            .filter { it.chatId == vault }
+            .map { it.topicId }
+        if (!PenjagaVault.bolehAdopsiVaultLama(topicIdDipakai)) {
+            return HasilPeriksaVault.TidakAdaAksi
+        }
+        val calon = deteksiVaultMilikSendiri()
+        val adopsi = PenjagaVault.pilihAdopsi(calon.keCalon(), NAMA_VAULT_BAWAAN)
+        if (adopsi != null) {
+            pengaturan.setVaultChatId(adopsi.chatId)
+            return HasilPeriksaVault.Diadopsi(
+                KandidatVault(adopsi.chatId, adopsi.nama, forumSiap = true),
+            )
+        }
+        if (calon.size > 1) return HasilPeriksaVault.BanyakKandidat(calon.size)
+        return HasilPeriksaVault.TidakAdaAksi
+    }
+
+    /** Ubah daftar kandidat menjadi calon murni untuk [PenjagaVault]. */
+    private fun List<KandidatVault>.keCalon(): List<PenjagaVault.CalonVault> =
+        map { PenjagaVault.CalonVault(it.chatId, it.nama) }
 
     /** Ringkasan kesehatan vault aktif untuk layar Pengaturan. */
     data class InfoVault(
@@ -203,20 +299,32 @@ class ArsipRepository(
                 "Vault bertipe ${telegram.labelTipeChat(chat)}, bukan grup.",
             )
         }
-        return try {
-            telegram.daftarTopik(vault)
-            InfoVault(vault, nama, true, null)
-        } catch (e: Exception) {
-            val mentah = e.message ?: "galat tak dikenal"
-            // Pesan status konteks Pengaturan (tanpa klaim "setelah aktivasi",
-            // karena di sini tidak ada aktivasi yang dicoba).
-            val masalah = when {
-                PenjagaVault.galatHanyaSupergroup(mentah) ->
-                    PenjagaVault.pesanVaultBukanSupergroup("tak diketahui")
-                PenjagaVault.galatBukanForum(mentah) -> "Forum belum aktif di grup ini."
-                else -> mentah
+        // Retry terbatas bila forum belum efektif: grup forum yang baru
+        // dibuat bisa butuh sedetik sebelum GetForumTopics mengenalinya.
+        // Hanya untuk galat bukan-forum, maks 2x ulang jeda 1,5 dtk;
+        // vault sehat lolos percobaan pertama tanpa penundaan.
+        var percobaan = 0
+        while (true) {
+            try {
+                telegram.daftarTopik(vault)
+                return InfoVault(vault, nama, true, null)
+            } catch (e: Exception) {
+                val mentah = e.message ?: "galat tak dikenal"
+                if (PenjagaVault.galatBukanForum(mentah) && percobaan < 2) {
+                    percobaan++
+                    delay(1500)
+                    continue
+                }
+                // Pesan status konteks Pengaturan (tanpa klaim "setelah aktivasi",
+                // karena di sini tidak ada aktivasi yang dicoba).
+                val masalah = when {
+                    PenjagaVault.galatHanyaSupergroup(mentah) ->
+                        PenjagaVault.pesanVaultBukanSupergroup("tak diketahui")
+                    PenjagaVault.galatBukanForum(mentah) -> "Forum belum aktif di grup ini."
+                    else -> mentah
+                }
+                return InfoVault(vault, nama, false, masalah)
             }
-            InfoVault(vault, nama, false, masalah)
         }
     }
 
@@ -568,7 +676,7 @@ class ArsipRepository(
      */
     private suspend fun gantiVaultOtomatisDanBuatTopik(nama: String): TelegramClient.InfoTopik {
         pengaturan.setVaultChatId(null)
-        val baru = buatVaultBaru()
+        val baru = buatVaultBaru().chatId
         try {
             return telegram.pastikanTopik(baru, nama)
         } catch (e: TelegramException) {

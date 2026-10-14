@@ -131,4 +131,71 @@ class PenjagaVaultTest {
         val aktivasi = PenjagaVault.pesanAktivasiGagal("CHAT_NOT_MODIFIED")
         assertEquals(aktivasi, PenjagaVault.terjemahkanGalatForum(aktivasi))
     }
+
+    // ---- Auto-detect vault milik sendiri (Build #26) ----
+
+    private val calonDua = listOf(
+        PenjagaVault.CalonVault(-1001, "Grup Lain"),
+        PenjagaVault.CalonVault(-1002, "Arsip Senja"),
+    )
+
+    @Test
+    fun adopsiNamaCocokMenangAtasYangLain() {
+        val adopsi = PenjagaVault.pilihAdopsi(calonDua, "Arsip Senja")
+        assertEquals(PenjagaVault.CalonVault(-1002, "Arsip Senja"), adopsi)
+    }
+
+    @Test
+    fun adopsiSatuSatunyaKandidatTanpaNamaCocok() {
+        val adopsi = PenjagaVault.pilihAdopsi(
+            listOf(PenjagaVault.CalonVault(-1003, "Arsip Lama")),
+            "Arsip Senja",
+        )
+        assertEquals(PenjagaVault.CalonVault(-1003, "Arsip Lama"), adopsi)
+    }
+
+    @Test
+    fun adopsiBeberapaKandidatTanpaNamaCocokMenolakMenebak() {
+        val calon = listOf(
+            PenjagaVault.CalonVault(-1004, "Grup A"),
+            PenjagaVault.CalonVault(-1005, "Grup B"),
+        )
+        assertEquals(null, PenjagaVault.pilihAdopsi(calon, "Arsip Senja"))
+    }
+
+    @Test
+    fun adopsiTanpaKandidatMenghasilkanNull() {
+        assertEquals(null, PenjagaVault.pilihAdopsi(emptyList(), "Arsip Senja"))
+    }
+
+    @Test
+    fun cariNamaSamaTidakPeduliKapitalisasiDanSpasi() {
+        val ketemu = PenjagaVault.cariNamaSama(calonDua, "  arsip SENJA ")
+        assertEquals(PenjagaVault.CalonVault(-1002, "Arsip Senja"), ketemu)
+        assertEquals(null, PenjagaVault.cariNamaSama(calonDua, "Tidak Ada"))
+    }
+
+    @Test
+    fun adopsiVaultLamaHanyaBilaTidakAdaKoleksiBertopik() {
+        assertTrue(PenjagaVault.bolehAdopsiVaultLama(emptyList()))
+        assertTrue(PenjagaVault.bolehAdopsiVaultLama(listOf(0, 0)))
+        assertFalse(PenjagaVault.bolehAdopsiVaultLama(listOf(0, 7)))
+        assertFalse(PenjagaVault.bolehAdopsiVaultLama(listOf(3)))
+    }
+
+    @Test
+    fun pesanDeteksiDanDedupeMenyebutNamaVault() {
+        assertTrue(
+            PenjagaVault.pesanAdopsiOtomatis("Arsip Senja")
+                .contains("terdeteksi otomatis"),
+        )
+        assertTrue(
+            PenjagaVault.pesanVaultSudahAda("Arsip Senja")
+                .contains("sudah ada, dipakai lagi"),
+        )
+        assertTrue(
+            PenjagaVault.pesanBanyakKandidat(3)
+                .contains("3 grup milikmu"),
+        )
+    }
 }

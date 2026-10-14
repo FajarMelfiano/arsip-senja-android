@@ -126,4 +126,50 @@ object PenjagaVault {
         } else {
             Keputusan.BuangDanBuatBaru
         }
+
+    // ---- Auto-detect vault milik sendiri (Build #26) ----
+
+    /** Kandidat vault untuk auto-detect: supergroup milik sendiri, forum-siap. */
+    data class CalonVault(val chatId: Long, val nama: String)
+
+    /**
+     * True bila vault lama yang tidak sah boleh diganti otomatis oleh
+     * auto-adopt. Aman hanya bila tidak ada koleksi yang memakai vault
+     * lama itu, atau semua koleksinya bertopicId == 0 (koleksi channel
+     * lama yang tidak hidup di dalam topik vault).
+     */
+    fun bolehAdopsiVaultLama(topicIdKoleksi: List<Int>): Boolean =
+        topicIdKoleksi.all { it == 0 }
+
+    /** Cari calon dengan nama yang sama (case-insensitive, trim). */
+    fun cariNamaSama(calon: List<CalonVault>, nama: String): CalonVault? {
+        val bersih = nama.trim()
+        return calon.firstOrNull { it.nama.trim().equals(bersih, ignoreCase = true) }
+    }
+
+    /**
+     * Pilih satu calon untuk diadopsi otomatis: kecocokan nama persis
+     * ("Arsip Senja") menang atas segalanya; bila tidak ada yang cocok
+     * nama tetapi hanya ada SATU calon, pakai itu. Bila ada beberapa
+     * calon tanpa kecocokan nama, kembalikan null — jangan menebak.
+     */
+    fun pilihAdopsi(calon: List<CalonVault>, namaBawaan: String): CalonVault? {
+        if (calon.isEmpty()) return null
+        cariNamaSama(calon, namaBawaan)?.let { return it }
+        if (calon.size == 1) return calon.first()
+        return null
+    }
+
+    /** Pesan bila auto-adopt berhasil: vault sehat terdeteksi dan dipakai. */
+    fun pesanAdopsiOtomatis(nama: String): String =
+        "Vault \"$nama\" terdeteksi otomatis dan dijadikan aktif."
+
+    /** Pesan bila "Buat vault baru" menemukan vault lama bernama sama. */
+    fun pesanVaultSudahAda(nama: String): String =
+        "Vault \"$nama\" sudah ada, dipakai lagi."
+
+    /** Pesan bila vault rusak tetapi ada beberapa grup milik sendiri siap pakai. */
+    fun pesanBanyakKandidat(jumlah: Int): String =
+        "Vault rusak. Ditemukan $jumlah grup milikmu yang siap dipakai — " +
+            "pilih salah satu di \"Pilih grup lama\"."
 }

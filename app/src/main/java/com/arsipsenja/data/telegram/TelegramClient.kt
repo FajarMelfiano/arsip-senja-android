@@ -453,7 +453,39 @@ class TelegramClient(
         val tertutup: Boolean,
     )
 
-    /** Supergroup (bukan channel) milik daftar chat utama — kandidat vault. */
+    /** Id pengguna sendiri via GetMe, di-cache selama hidup client. */
+    @Volatile
+    private var idSaya: Long? = null
+
+    suspend fun sayaId(): Long =
+        idSaya ?: kirim(TdApi.GetMe()).id.also { idSaya = it }
+
+    /**
+     * True bila pengguna sendiri adalah PEMBUAT (creator) grup ini.
+     * Dipakai untuk menyaring "Pilih grup lama" agar hanya menampilkan
+     * grup milik sendiri, bukan grup orang lain yang diikuti.
+     *
+     * Nama kelas TDLib diverifikasi dari AAR dependensi (capullo-tech,
+     * commit 11850ef): GetChatMember memakai `memberId: MessageSender`,
+     * bukan userId mentah — jadi anggota dinyatakan via MessageSenderUser.
+     */
+    suspend fun apakahPemilik(chatId: Long): Boolean {
+        val anggota = kirim(
+            TdApi.GetChatMember().apply {
+                this.chatId = chatId
+                memberId = TdApi.MessageSenderUser(sayaId())
+            },
+        )
+        return anggota.status is TdApi.ChatMemberStatusCreator
+    }
+
+    /**
+     * Supergroup (bukan channel) MILIK SENDIRI dari daftar chat utama —
+     * kandidat vault. Grup yang gagal diperiksa kepemilikannya
+     * dikeluarkan (fail-closed) + dicatat ke log; bila SEMUA pengecekan
+     * gagal, galat dilempar agar UI menampilkan "Gagal memuat grup: ..."
+     * bukan daftar kosong yang menyesatkan.
+     */
     suspend fun daftarSupergroup(): List<TdApi.Chat> {
         val daftar = kirim(
             TdApi.GetChats().apply {
@@ -461,7 +493,7 @@ class TelegramClient(
                 limit = 100
             },
         )
-        return daftar.chatIds.toList()
+        val supergroup = daftar.chatIds.toList()
             .mapNotNull { id ->
                 try {
                     kirim(TdApi.GetChat().apply { chatId = id })
@@ -474,6 +506,23 @@ class TelegramClient(
                 val tipe = it.type
                 tipe is TdApi.ChatTypeSupergroup && !tipe.isChannel
             }
+        var gagalPeriksa = 0
+        val milikSendiri = supergroup.filter { chat ->
+            try {
+                apakahPemilik(chat.id)
+            } catch (e: Exception) {
+                gagalPeriksa++
+                Log.w(tag, "Gagal memeriksa kepemilikan grup ${chat.id}", e)
+                false
+            }
+        }
+        if (supergroup.isNotEmpty() && gagalPeriksa == supergroup.size) {
+            throw TelegramException(
+                "Gagal memeriksa kepemilikan grup. Coba lagi.",
+                0,
+            )
+        }
+        return milikSendiri
     }
 
     /** Buat grup vault forum baru bernama [nama]. */

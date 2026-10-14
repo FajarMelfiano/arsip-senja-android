@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.arsipsenja.data.local.PengaturanStore
 import com.arsipsenja.data.local.StatistikBerkas
 import com.arsipsenja.data.repo.ArsipRepository
+import com.arsipsenja.data.repo.PenjagaVault
 import com.arsipsenja.data.telegram.StatusOtorisasi
 import com.arsipsenja.data.telegram.TelegramClient
 import com.arsipsenja.data.telegram.TelegramException
@@ -66,10 +67,10 @@ class PengaturanViewModel(
     private val _infoVault = MutableStateFlow<ArsipRepository.InfoVault?>(null)
     val infoVault: StateFlow<ArsipRepository.InfoVault?> = _infoVault.asStateFlow()
 
-    init {
-        muatVaultAktif()
-        muatInfoVault()
-    }
+    // Pemuatan pertama TIDAK di init: PengaturanScreen memanggil
+    // muatVaultAktif()/muatInfoVault() lewat LaunchedEffect tiap kali
+    // ditampilkan (termasuk pertama kali). Pemuatan ganda di sini akan
+    // menjalankan deteksi vault dua kali bersamaan.
 
     fun muatVaultAktif() {
         viewModelScope.launch {
@@ -77,10 +78,35 @@ class PengaturanViewModel(
         }
     }
 
-    /** Muat ulang nama + status kesehatan vault aktif. */
+    /**
+     * Muat ulang nama + status kesehatan vault aktif. Dijalankan tiap
+     * kali Pengaturan ditampilkan (LaunchedEffect) agar status tidak basi.
+     * Sebelum cek kesehatan, jalankan auto-adopt: vault rusak (mis. channel)
+     * diganti otomatis dengan vault sehat milik sendiri bila aman.
+     * Bila pengecekan gagal, PERTAHANKAN info lama dan tampilkan alasan
+     * gagalnya — kegagalan pengecekan bukan berarti vault "Bermasalah".
+     */
     fun muatInfoVault() {
         viewModelScope.launch {
-            _infoVault.value = runCatching { repo.infoVaultAktif() }.getOrNull()
+            try {
+                when (val hasil = repo.periksaDanAdopsiVault()) {
+                    is ArsipRepository.HasilPeriksaVault.Diadopsi -> {
+                        _vaultAktif.value = hasil.kandidat.chatId
+                        _pesanVault.value =
+                            PenjagaVault.pesanAdopsiOtomatis(hasil.kandidat.nama)
+                    }
+                    is ArsipRepository.HasilPeriksaVault.BanyakKandidat -> {
+                        _pesanVault.value =
+                            PenjagaVault.pesanBanyakKandidat(hasil.jumlah)
+                    }
+                    ArsipRepository.HasilPeriksaVault.TidakAdaAksi -> Unit
+                }
+                _infoVault.value = repo.infoVaultAktif()
+            } catch (e: Exception) {
+                _pesanVault.value =
+                    "Gagal memeriksa status vault: ${e.message}. " +
+                        "Coba buka lagi Pengaturan."
+            }
         }
     }
 
@@ -144,9 +170,13 @@ class PengaturanViewModel(
         viewModelScope.launch {
             _memuatVault.value = true
             try {
-                val chatId = repo.buatVaultBaru(bersih)
-                _vaultAktif.value = chatId
-                _pesanVault.value = "Vault \"$bersih\" dibuat dan dijadikan aktif."
+                val hasil = repo.buatVaultBaru(bersih)
+                _vaultAktif.value = hasil.chatId
+                _pesanVault.value = if (hasil.dibuatBaru) {
+                    "Vault \"${hasil.nama}\" dibuat dan dijadikan aktif."
+                } else {
+                    PenjagaVault.pesanVaultSudahAda(hasil.nama)
+                }
                 muatInfoVault()
             } catch (e: Exception) {
                 _pesanVault.value = "Gagal membuat vault: ${e.message}"

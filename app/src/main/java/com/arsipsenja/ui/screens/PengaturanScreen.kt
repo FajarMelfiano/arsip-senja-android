@@ -31,6 +31,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -69,6 +70,14 @@ import com.arsipsenja.util.UrutBerkas
 @Composable
 fun PengaturanScreen() {
     val vm: PengaturanViewModel = viewModel(factory = PengaturanViewModel.Pabrik)
+
+    // Refresh tiap kali layar ditampilkan: status vault tidak boleh basi.
+    // ViewModel dipertahankan antar-tab (saveState/restoreState), jadi
+    // tanpa ini status dari kunjungan sebelumnya akan tampil lagi.
+    LaunchedEffect(Unit) {
+        vm.muatVaultAktif()
+        vm.muatInfoVault()
+    }
 
     val tampilan by vm.tampilan.collectAsState()
     val urut by vm.urut.collectAsState()
@@ -523,8 +532,9 @@ private fun DialogPilihGrup(
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = "Grup yang belum mode forum akan diaktifkan otomatis saat dipilih " +
-                        "(butuh hak pemilik grup).",
+                    text = "Hanya grup yang kamu buat (kamu pemiliknya). " +
+                        "Grup yang belum mode forum akan diaktifkan otomatis " +
+                        "saat dipilih (butuh hak pemilik grup).",
                     style = MaterialTheme.typography.bodySmall,
                     color = WarnaArsip.Tinta2,
                 )
@@ -542,7 +552,7 @@ private fun DialogPilihGrup(
                     }
                 } else if (kandidat.isEmpty()) {
                     Text(
-                        text = "Tidak ada supergroup ditemukan di akun ini.",
+                        text = "Belum ada grup milikmu — buat vault baru.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = WarnaArsip.Tinta3,
                     )
