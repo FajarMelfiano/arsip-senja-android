@@ -172,4 +172,24 @@ object PenjagaVault {
     fun pesanBanyakKandidat(jumlah: Int): String =
         "Vault rusak. Ditemukan $jumlah grup milikmu yang siap dipakai — " +
             "pilih salah satu di \"Pilih grup lama\"."
+
+    // ---- Verifikasi hasil pembuatan vault ----
+
+    /**
+     * Aturan murni "chat ini sah dipakai sebagai vault": harus supergroup
+     * dan BUKAN channel. Dipakai [TelegramClient.adalahVaultSah] dan
+     * verifikasi sesudah buat — channel tidak bisa menampung topik.
+     */
+    fun grupBaruSah(isSupergroup: Boolean, isChannel: Boolean): Boolean =
+        isSupergroup && !isChannel
+
+    /**
+     * Pesan bila pembuatan vault menghasilkan channel, bukan grup.
+     * Harus tampil sebagai GALAT (bukan "sukses" palsu) agar tidak ada
+     * lagi vault channel yang diam-diam diaktifkan.
+     */
+    fun pesanBuatVaultChannel(tipe: String): String =
+        "Telegram membuat $tipe, bukan grup, sehingga tidak bisa dipakai " +
+            "sebagai vault. Coba lagi, atau buat grup secara manual di " +
+            "Telegram lalu pilih di \"Pilih grup lama\"."
 }

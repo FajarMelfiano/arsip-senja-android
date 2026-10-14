@@ -211,9 +211,21 @@ class ArsipRepository(
         return buatVaultBaru().chatId
     }
 
-    /** Daftar supergroup milik sendiri yang forum-siap (topik bisa dibaca). */
+    /**
+     * Daftar supergroup milik sendiri yang forum-siap (topik bisa dibaca).
+     * Gabungkan dua sumber: GetChats (100 chat teratas) + SearchChats nama
+     * vault bawaan — grup lama yang sudah lama tidak aktif tidak masuk 100
+     * teratas GetChats, tetapi SearchChats menjangkau seluruh daftar chat.
+     */
     suspend fun deteksiVaultMilikSendiri(): List<KandidatVault> {
-        return telegram.daftarSupergroup().mapNotNull { chat ->
+        // Sumber kedua tidak boleh mematikan sumber pertama: bila
+        // SearchChats gagal, deteksi tetap jalan dari GetChats.
+        val dariPencarian = runCatching { telegram.cariChat(NAMA_VAULT_BAWAAN) }
+            .onFailure { Log.i(tag, "SearchChats gagal, lanjut dari GetChats: ${it.message}") }
+            .getOrDefault(emptyList())
+        val gabungan = (telegram.daftarSupergroup() + dariPencarian)
+            .distinctBy { it.id }
+        return gabungan.mapNotNull { chat ->
             try {
                 telegram.daftarTopik(chat.id)
                 KandidatVault(

@@ -5,6 +5,7 @@ import android.os.Build
 import android.util.Log
 import com.arsipsenja.BuildConfig
 import com.arsipsenja.data.local.PengaturanStore
+import com.arsipsenja.data.repo.PenjagaVault
 import com.arsipsenja.util.TipeFile
 import java.io.File
 import kotlinx.coroutines.async
@@ -419,10 +420,14 @@ class TelegramClient(
     /**
      * True bila chat adalah supergroup biasa (bukan channel): satu-satunya
      * tipe yang sah sebagai vault (bisa menampung topik forum).
+     * Aturan murninya di [PenjagaVault.grupBaruSah] agar bisa diuji unit.
      */
     fun adalahVaultSah(chat: TdApi.Chat): Boolean {
         val tipe = chat.type
-        return tipe is TdApi.ChatTypeSupergroup && !tipe.isChannel
+        return PenjagaVault.grupBaruSah(
+            tipe is TdApi.ChatTypeSupergroup,
+            (tipe as? TdApi.ChatTypeSupergroup)?.isChannel ?: false,
+        )
     }
 
     /**
@@ -502,10 +507,7 @@ class TelegramClient(
                     null
                 }
             }
-            .filter {
-                val tipe = it.type
-                tipe is TdApi.ChatTypeSupergroup && !tipe.isChannel
-            }
+            .filter { adalahVaultSah(it) }
         var gagalPeriksa = 0
         val milikSendiri = supergroup.filter { chat ->
             try {
@@ -525,9 +527,41 @@ class TelegramClient(
         return milikSendiri
     }
 
-    /** Buat grup vault forum baru bernama [nama]. */
-    suspend fun buatVault(nama: String): TdApi.Chat =
-        kirim(
+    /**
+     * Cari chat berdasarkan nama (SearchChats menjangkau SELURUH daftar
+     * chat, bukan hanya 100 teratas seperti GetChats). Dipakai deteksi
+     * vault bernama sama yang sudah lama tidak aktif.
+     */
+    suspend fun cariChat(nama: String): List<TdApi.Chat> {
+        val daftar = kirim(
+            TdApi.SearchChats().apply {
+                query = nama.trim()
+                limit = 50
+            },
+        )
+        return daftar.chatIds.toList()
+            .mapNotNull { id ->
+                try {
+                    kirim(TdApi.GetChat().apply { chatId = id })
+                } catch (e: Exception) {
+                    Log.w(tag, "Gagal memuat chat $id", e)
+                    null
+                }
+            }
+            .filter { adalahVaultSah(it) }
+    }
+
+    /**
+     * Buat grup vault forum baru bernama [nama].
+     *
+     * Verifikasi sesudah buat: bila hasil GetChat ternyata channel (bukan
+     * grup), JANGAN kembalikan — lempar galat jelas. Tanpa verifikasi ini
+     * kegagalan pembuatan tampil sebagai "sukses" palsu dan vault channel
+     * yang tidak bisa dipakai ikut diaktifkan (riwayat: v1 membuat channel,
+     * menumpuk duplikat "Arsip Senja" yang tidak bisa dipakai).
+     */
+    suspend fun buatVault(nama: String): TdApi.Chat {
+        val chat = kirim(
             TdApi.CreateNewSupergroupChat().apply {
                 title = nama.trim()
                 isForum = true
@@ -538,6 +572,15 @@ class TelegramClient(
                 forImport = false
             },
         )
+        val segar = ambilChat(chat.id)
+        if (!adalahVaultSah(segar)) {
+            throw TelegramException(
+                PenjagaVault.pesanBuatVaultChannel(labelTipeChat(segar)),
+                0,
+            )
+        }
+        return segar
+    }
 
     /**
      * Aktifkan mode forum pada supergroup lama (yang belum forum), agar bisa

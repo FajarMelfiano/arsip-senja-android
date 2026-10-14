@@ -98,6 +98,7 @@ fun PengaturanScreen() {
 
     val vaultAktif by vm.vaultAktif.collectAsState()
     val kandidatVault by vm.kandidatVault.collectAsState()
+    val galatKandidat by vm.galatKandidat.collectAsState()
     val memuatVault by vm.memuatVault.collectAsState()
     val pesanVault by vm.pesanVault.collectAsState()
     val infoVault by vm.infoVault.collectAsState()
@@ -397,6 +398,7 @@ fun PengaturanScreen() {
         DialogPilihGrup(
             kandidat = kandidatVault,
             memuat = memuatVault,
+            galat = galatKandidat,
             vaultAktif = vaultAktif,
             onPilih = { chatId ->
                 dialogGrup = false
@@ -510,6 +512,7 @@ private fun BarisLabel(label: String, nilai: String) {
 private fun DialogPilihGrup(
     kandidat: List<ArsipRepository.KandidatVault>,
     memuat: Boolean,
+    galat: String?,
     vaultAktif: Long?,
     onPilih: (Long) -> Unit,
     onTutup: () -> Unit,
@@ -551,10 +554,14 @@ private fun DialogPilihGrup(
                         )
                     }
                 } else if (kandidat.isEmpty()) {
+                    // Bedakan "belum ada grup" dari "gagal memuat grup":
+                    // empty state tanpa alasan membuat pengguna mengira
+                    // daftarnya memang kosong padahal muatannya yang gagal.
                     Text(
-                        text = "Belum ada grup milikmu — buat vault baru.",
+                        text = galat
+                            ?: "Belum ada grup milikmu — buat vault baru.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = WarnaArsip.Tinta3,
+                        color = if (galat != null) WarnaArsip.Bahaya else WarnaArsip.Tinta3,
                     )
                 } else {
                     LazyColumn(

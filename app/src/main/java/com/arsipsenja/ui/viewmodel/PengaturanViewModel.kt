@@ -63,6 +63,10 @@ class PengaturanViewModel(
     private val _pesanVault = MutableStateFlow<String?>(null)
     val pesanVault: StateFlow<String?> = _pesanVault.asStateFlow()
 
+    /** Alasan terakhir gagal memuat daftar grup (ditampilkan di dialog). */
+    private val _galatKandidat = MutableStateFlow<String?>(null)
+    val galatKandidat: StateFlow<String?> = _galatKandidat.asStateFlow()
+
     /** Nama grup + status kesehatan vault aktif (nama via GetChat). */
     private val _infoVault = MutableStateFlow<ArsipRepository.InfoVault?>(null)
     val infoVault: StateFlow<ArsipRepository.InfoVault?> = _infoVault.asStateFlow()
@@ -115,8 +119,12 @@ class PengaturanViewModel(
             _memuatVault.value = true
             try {
                 _kandidatVault.value = repo.daftarKandidatVault()
+                _galatKandidat.value = null
                 _pesanVault.value = null
             } catch (e: Exception) {
+                // Jangan biarkan dialog menampilkan empty state yang
+                // menyesatkan saat pemuatan yang gagal — tampilkan alasannya.
+                _galatKandidat.value = "Gagal memuat grup: ${e.message}"
                 _pesanVault.value = "Gagal memuat grup: ${e.message}"
             } finally {
                 _memuatVault.value = false
@@ -135,6 +143,16 @@ class PengaturanViewModel(
                 } else {
                     "Vault diganti. Koleksi baru akan dibuat sebagai topik di grup ini."
                 }
+                // Optimistis: tampilkan nama + status baru SEKARANG, jangan
+                // tunggu refresh async — sebelumnya banner "Vault diganti"
+                // tampil sementara baris vault masih menunjukkan nama lama.
+                val kandidat = _kandidatVault.value.firstOrNull { it.chatId == chatId }
+                _infoVault.value = ArsipRepository.InfoVault(
+                    chatId = chatId,
+                    nama = kandidat?.nama ?: "Grup $chatId",
+                    forumSiap = forumBaru || kandidat?.forumSiap == true,
+                    masalah = null,
+                )
                 muatInfoVault()
             } catch (e: Exception) {
                 _pesanVault.value = "Gagal memilih vault: ${e.message}"
@@ -177,6 +195,17 @@ class PengaturanViewModel(
                 } else {
                     PenjagaVault.pesanVaultSudahAda(hasil.nama)
                 }
+                // Optimistis: dedupe hanya mengadopsi kandidat forum-siap
+                // dan pembuatan baru sudah diverifikasi sebagai grup forum
+                // di TelegramClient. Refresh async tetap mengoreksi bila
+                // perlu — tanpa ini baris vault sempat menampilkan nama
+                // vault lama sementara banner sudah mengumumkan yang baru.
+                _infoVault.value = ArsipRepository.InfoVault(
+                    chatId = hasil.chatId,
+                    nama = hasil.nama,
+                    forumSiap = true,
+                    masalah = null,
+                )
                 muatInfoVault()
             } catch (e: Exception) {
                 _pesanVault.value = "Gagal membuat vault: ${e.message}"

@@ -198,4 +198,20 @@ class PenjagaVaultTest {
                 .contains("3 grup milikmu"),
         )
     }
+
+    @Test
+    fun grupBaruSahHanyaSupergroupBukanChannel() {
+        assertTrue(PenjagaVault.grupBaruSah(isSupergroup = true, isChannel = false))
+        assertFalse(PenjagaVault.grupBaruSah(isSupergroup = true, isChannel = true))
+        assertFalse(PenjagaVault.grupBaruSah(isSupergroup = false, isChannel = false))
+        assertFalse(PenjagaVault.grupBaruSah(isSupergroup = false, isChannel = true))
+    }
+
+    @Test
+    fun pesanBuatVaultChannelMenyebutTipeDanJalurManual() {
+        val pesan = PenjagaVault.pesanBuatVaultChannel("channel")
+        assertTrue(pesan.contains("channel"))
+        assertTrue(pesan.contains("bukan grup"))
+        assertTrue(pesan.contains("manual"))
+    }
 }
