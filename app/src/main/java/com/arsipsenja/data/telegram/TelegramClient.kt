@@ -552,19 +552,31 @@ class TelegramClient(
     }
 
     /**
-     * Buat grup vault forum baru bernama [nama].
+     * Buat grup vault forum baru bernama [nama], dalam DUA tahap:
      *
-     * Verifikasi sesudah buat: bila hasil GetChat ternyata channel (bukan
-     * grup), JANGAN kembalikan — lempar galat jelas. Tanpa verifikasi ini
-     * kegagalan pembuatan tampil sebagai "sukses" palsu dan vault channel
-     * yang tidak bisa dipakai ikut diaktifkan (riwayat: v1 membuat channel,
-     * menumpuk duplikat "Arsip Senja" yang tidak bisa dipakai).
+     * 1. Buat supergroup BIASA (`isForum = false`, `isChannel = false`),
+     *    lalu verifikasi hasilnya benar-benar grup via GetChat.
+     * 2. Aktifkan mode forum via ToggleSupergroupIsForum, lalu verifikasi
+     *    lagi.
+     *
+     * Satu tahap tidak bisa dipakai: terbukti di perangkat (Build #26 dan
+     * #27) bahwa kombinasi `isForum = true` dalam satu panggilan
+     * CreateNewSupergroupChat menghasilkan CHANNEL, bukan grup forum —
+     * meski skema TDLib menyebut isChannel "diabaikan bila forum dibuat".
+     * Memisahkan pembuatan grup dan pengaktifan forum menghindari
+     * kombinasi yang rusak itu; ToggleSupergroupIsForum sendiri sudah
+     * terbukti jalan di jalur pilih-grup-lama / self-healing.
+     *
+     * Bila tahap 1 menghasilkan channel, lempar galat jelas dan JANGAN
+     * aktifkan. Bila tahap 2 gagal, grup biasanya tetap terbentuk sebagai
+     * grup biasa dan bisa dipakai lewat "Pilih grup lama" (forum
+     * diaktifkan saat dipilih).
      */
     suspend fun buatVault(nama: String): TdApi.Chat {
         val chat = kirim(
             TdApi.CreateNewSupergroupChat().apply {
                 title = nama.trim()
-                isForum = true
+                isForum = false
                 isChannel = false
                 description = ""
                 location = null
@@ -572,14 +584,22 @@ class TelegramClient(
                 forImport = false
             },
         )
-        val segar = ambilChat(chat.id)
-        if (!adalahVaultSah(segar)) {
+        val grup = ambilChat(chat.id)
+        if (!adalahVaultSah(grup)) {
             throw TelegramException(
-                PenjagaVault.pesanBuatVaultChannel(labelTipeChat(segar)),
+                PenjagaVault.pesanBuatVaultChannel(labelTipeChat(grup)),
                 0,
             )
         }
-        return segar
+        aktifkanForum(grup.id)
+        val forum = ambilChat(chat.id)
+        if (!adalahVaultSah(forum)) {
+            throw TelegramException(
+                PenjagaVault.pesanBuatVaultChannel(labelTipeChat(forum)),
+                0,
+            )
+        }
+        return forum
     }
 
     /**
