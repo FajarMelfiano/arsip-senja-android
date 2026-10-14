@@ -6,6 +6,7 @@ import com.arsipsenja.data.local.PengaturanStore
 import com.arsipsenja.data.local.StatistikBerkas
 import com.arsipsenja.data.repo.ArsipRepository
 import com.arsipsenja.data.repo.PenjagaVault
+import com.arsipsenja.data.repo.StatusRealtime
 import com.arsipsenja.data.telegram.StatusOtorisasi
 import com.arsipsenja.data.telegram.TelegramClient
 import com.arsipsenja.data.telegram.TelegramException
@@ -70,6 +71,9 @@ class PengaturanViewModel(
     /** Nama grup + status kesehatan vault aktif (nama via GetChat). */
     private val _infoVault = MutableStateFlow<ArsipRepository.InfoVault?>(null)
     val infoVault: StateFlow<ArsipRepository.InfoVault?> = _infoVault.asStateFlow()
+
+    /** Status mesin realtime (untuk baris "Terakhir diperbarui"). */
+    val statusRealtime: StateFlow<StatusRealtime> = repo.statusRealtime
 
     // Pemuatan pertama TIDAK di init: PengaturanScreen memanggil
     // muatVaultAktif()/muatInfoVault() lewat LaunchedEffect tiap kali

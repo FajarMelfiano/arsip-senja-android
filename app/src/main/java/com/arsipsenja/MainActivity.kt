@@ -46,6 +46,15 @@ class MainActivity : FragmentActivity() {
             }
         }
     }
+
+    /**
+     * Trigger foreground mesin realtime: sinkron ringan sekali bila
+     * sinkron terakhir sudah melewati ambang (anti-spam).
+     */
+    override fun onStart() {
+        super.onStart()
+        (application as ArsipSenjaApp).wadah.arsipRepository.saatKembaliForeground()
+    }
 }
 
 /**

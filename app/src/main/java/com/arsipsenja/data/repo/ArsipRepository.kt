@@ -22,6 +22,7 @@ import com.arsipsenja.data.local.TautanEntity
 import com.arsipsenja.data.local.TipeKunci
 import com.arsipsenja.data.telegram.TelegramClient
 import com.arsipsenja.data.telegram.TelegramException
+import com.arsipsenja.data.telegram.BerkasMentah
 import com.arsipsenja.data.telegram.keBerkasMentah
 import com.arsipsenja.data.telegram.keEntity
 import com.arsipsenja.data.work.DownloadWorker
@@ -29,12 +30,24 @@ import com.arsipsenja.data.work.UploadWorker
 import com.arsipsenja.util.TipeFile
 import android.provider.OpenableColumns
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import org.drinkless.tdlib.TdApi
 
 /**
@@ -393,19 +406,35 @@ class ArsipRepository(
      * Sinkronkan semua koleksi PRIBADI yang sudah terdaftar (ambil riwayat
      * terbaru, masukkan berkas baru ke indeks lokal). Koleksi impor
      * disinkron dari tab Impor via [sinkronImpor], bukan dari sini.
+     * Dipanggil manual dari UI — tombol Sinkron tetap ada sebagai
+     * fallback di samping mesin realtime otomatis.
      */
     suspend fun sinkronSemua() {
-        val koleksi = koleksiDao.ambilSemuaPribadi()
-        koleksi.forEach { sinkronKoleksi(it.kunci) }
-        koleksiDao.hitungUlangSemua()
+        kunciSinkron.withLock {
+            _statusRealtime.update { it.copy(menyinkronkan = true) }
+            try {
+                val koleksi = koleksiDao.ambilSemuaPribadi()
+                koleksi.forEach { sinkronKoleksi(it.kunci) }
+                koleksiDao.hitungUlangSemua()
+            } finally {
+                _statusRealtime.update { it.copy(menyinkronkan = false) }
+            }
+        }
     }
 
     /** Sinkronkan semua koleksi impor (dipanggil dari tab Impor). */
     suspend fun sinkronImpor(): Int {
-        val koleksi = koleksiDao.ambilSemuaImpor()
-        var baru = 0
-        koleksi.forEach { baru += sinkronKoleksi(it.kunci) }
-        return baru
+        kunciSinkron.withLock {
+            _statusRealtime.update { it.copy(menyinkronkan = true) }
+            try {
+                val koleksi = koleksiDao.ambilSemuaImpor()
+                var baru = 0
+                koleksi.forEach { baru += sinkronKoleksi(it.kunci) }
+                return baru
+            } finally {
+                _statusRealtime.update { it.copy(menyinkronkan = false) }
+            }
+        }
     }
 
     /** Sinkron satu koleksi; mengembalikan jumlah berkas baru yang masuk. */
@@ -415,6 +444,7 @@ class ArsipRepository(
         koleksiDao.ambil(kunci.chatId, kunci.topicId)?.let {
             koleksiDao.simpan(it.copy(terakhirSinkron = System.currentTimeMillis()))
         }
+        catatSinkron()
         return baru
     }
 
@@ -555,6 +585,203 @@ class ArsipRepository(
         }
         koleksiDao.simpanSemua(entri)
         return entri
+    }
+
+    // ---- Mesin realtime (event-driven + debounce) ----
+
+    private val _statusRealtime = MutableStateFlow(StatusRealtime())
+
+    /** Status sinkron otomatis untuk UI (indikator + dialog progres). */
+    val statusRealtime: StateFlow<StatusRealtime> = _statusRealtime.asStateFlow()
+
+    /**
+     * Scope milik mesin realtime: hidup selama proses aplikasi berjalan.
+     * SupervisorJob agar satu kolektor yang gagal tidak mematikan yang lain.
+     */
+    private val lingkupRealtime = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    /** Kunci agar dua sinkron (manual/otomatis) tidak tumpang tindih. */
+    private val kunciSinkron = Mutex()
+
+    private val realtimeBerjalan = AtomicBoolean(false)
+
+    /**
+     * Mulai mesin realtime — idempoten, dipanggil sekali dari
+     * [ArsipSenjaApp.onCreate]. Mengumpulkan:
+     * - pesan baru Telegram (batch 2 detik, hanya koleksi yang dikenal),
+     * - perubahan koneksi (Ready setelah putus → sinkron ringan bila ambang),
+     * - perubahan judul chat / info topik (refresh nama lokal saja,
+     *   tidak pernah membuat koleksi dari topik asing).
+     */
+    fun mulaiRealtime() {
+        if (!realtimeBerjalan.compareAndSet(false, true)) return
+        _statusRealtime.update { it.copy(aktif = true) }
+        // Hidrasi cap waktu sinkron terakhir agar bertahan antar restart.
+        lingkupRealtime.launch {
+            _statusRealtime.update { it.copy(sinkronTerakhir = pengaturan.sinkronTerakhir()) }
+        }
+        lingkupRealtime.launch { kolektorPesanBatch() }
+        lingkupRealtime.launch { kolektorKoneksi() }
+        lingkupRealtime.launch { kolektorJudulChat() }
+        lingkupRealtime.launch { kolektorInfoTopik() }
+        Log.i(tag, "Mesin realtime dimulai (jendela batch ${AturanRealtime.JENDELA_BATCH_MS} ms).")
+    }
+
+    /**
+     * Dipanggil saat aplikasi kembali foreground (MainActivity.onStart):
+     * sinkron ringan sekali bila sinkron terakhir sudah melewati ambang.
+     */
+    fun saatKembaliForeground() {
+        if (!realtimeBerjalan.get()) return
+        lingkupRealtime.launch { sinkronRinganOtomatis() }
+    }
+
+    /** Kumpulkan pesan baru dalam jendela batch, lalu ingest sekaligus. */
+    private suspend fun kolektorPesanBatch() {
+        val antre = Channel<TdApi.Message>(Channel.UNLIMITED)
+        val pemompa = lingkupRealtime.launch {
+            telegram.pesanBaru.collect { antre.trySend(it) }
+        }
+        val batch = mutableListOf<TdApi.Message>()
+        try {
+            while (coroutineContext.isActive) {
+                batch += antre.receive()
+                // Tunggu kiriman susulan dalam jendela; timeout = batch siap di-ingest.
+                withTimeoutOrNull(AturanRealtime.JENDELA_BATCH_MS) {
+                    while (coroutineContext.isActive) batch += antre.receive()
+                }
+                val isi = batch.toList()
+                batch.clear()
+                runCatching { prosesBatch(isi) }
+                    .onFailure { Log.w(tag, "Ingest batch realtime gagal: ${it.message}") }
+            }
+        } finally {
+            pemompa.cancel()
+            antre.close()
+        }
+    }
+
+    /**
+     * Ingest satu batch pesan baru ke indeks lokal. Hanya koleksi yang
+     * sudah dikenal; chat/topik asing diabaikan (tidak ada koleksi liar).
+     * Dedupe per "$chatId:$messageId" — aman terhadap UpdateNewMessage
+     * untuk kiriman sendiri yang juga sudah diindeks UploadWorker.
+     */
+    private suspend fun prosesBatch(pesan: List<TdApi.Message>) {
+        if (pesan.isEmpty()) return
+        val sudahAda = berkasDao.semuaId().toHashSet()
+        val perKunci = mutableMapOf<KunciKoleksi, MutableList<BerkasMentah>>()
+        var diproses = 0L
+        var diabaikan = 0L
+        var duplikat = 0L
+        for (m in pesan) {
+            val kunci = KunciKoleksi(m.chatId, AturanRealtime.topikDariPesan(m))
+            val dikenal = koleksiDao.ambil(kunci.chatId, kunci.topicId) != null
+            val id = AturanRealtime.kunciDedupe(m.chatId, m.id)
+            val mentah = m.keBerkasMentah()
+            when (AturanRealtime.keputusanPesan(dikenal, id in sudahAda, mentah != null)) {
+                AturanRealtime.KeputusanPesan.PROSES -> {
+                    perKunci.getOrPut(kunci) { mutableListOf() } += mentah ?: continue
+                    sudahAda += id
+                    diproses++
+                }
+                AturanRealtime.KeputusanPesan.ABAIKAN_TAK_DIKENAL,
+                AturanRealtime.KeputusanPesan.LEWATI_BUKAN_BERKAS -> diabaikan++
+                AturanRealtime.KeputusanPesan.LEWATI_DUPLIKAT -> duplikat++
+            }
+        }
+        val sekarang = System.currentTimeMillis()
+        for ((kunci, daftar) in perKunci) {
+            var nomor = berkasDao.jumlah(kunci.chatId, kunci.topicId)
+            val entri = daftar.map { b ->
+                nomor += 1
+                b.keEntity(kunci.chatId, kunci.topicId, nomor, sekarang)
+            }
+            berkasDao.simpanSemua(entri)
+            koleksiDao.hitungUlang(kunci.chatId, kunci.topicId)
+        }
+        if (diproses > 0) {
+            catatSinkron()
+            Log.i(tag, "Realtime: $diproses berkas baru masuk indeks.")
+        }
+        _statusRealtime.update {
+            it.copy(
+                pesanDiproses = it.pesanDiproses + diproses,
+                pesanDiabaikan = it.pesanDiabaikan + diabaikan,
+                duplikatDilewati = it.duplikatDilewati + duplikat,
+            )
+        }
+    }
+
+    /** Reaksi koneksi: Ready setelah putus → sinkron ringan bila ambang. */
+    private suspend fun kolektorKoneksi() {
+        var sebelumnya = false
+        telegram.koneksi.collect { siap ->
+            _statusRealtime.update { it.copy(tersambung = siap) }
+            if (siap && !sebelumnya) {
+                Log.i(tag, "Koneksi Telegram pulih — cek sinkron ringan.")
+                sinkronRinganOtomatis()
+            }
+            sebelumnya = siap
+        }
+    }
+
+    /** Refresh nama koleksi channel lama bila judulnya diubah di Telegram. */
+    private suspend fun kolektorJudulChat() {
+        telegram.judulChatBerubah.collect { (chatId, judul) ->
+            val entri = koleksiDao.ambil(chatId, 0) ?: return@collect
+            val baru = judul.ifBlank { entri.nama }
+            if (baru != entri.nama) koleksiDao.simpan(entri.copy(nama = baru))
+        }
+    }
+
+    /**
+     * Refresh nama koleksi topik yang SUDAH dikenal bila diubah di
+     * Telegram. Topik asing tetap tidak membuat koleksi baru.
+     */
+    private suspend fun kolektorInfoTopik() {
+        telegram.infoTopikBerubah.collect { (chatId, topicId, nama) ->
+            val entri = koleksiDao.ambil(chatId, topicId) ?: return@collect
+            val baru = nama.ifBlank { entri.nama }
+            if (baru != entri.nama) koleksiDao.simpan(entri.copy(nama = baru))
+        }
+    }
+
+    /**
+     * Sinkron ringan otomatis: semua koleksi pribadi. Dilewati bila
+     * sinkron terakhir masih dalam ambang (anti-spam saat koneksi
+     * flapping) atau bila sinkron lain sedang berjalan.
+     */
+    private suspend fun sinkronRinganOtomatis() {
+        if (!AturanRealtime.bolehSinkronUlang(pengaturan.sinkronTerakhir())) {
+            Log.i(tag, "Sinkron otomatis dilewati — baru saja sinkron.")
+            return
+        }
+        if (!kunciSinkron.tryLock()) {
+            Log.i(tag, "Sinkron otomatis dilewati — sinkron lain berjalan.")
+            return
+        }
+        try {
+            _statusRealtime.update { it.copy(menyinkronkan = true) }
+            try {
+                val koleksi = koleksiDao.ambilSemuaPribadi()
+                koleksi.forEach { sinkronKoleksi(it.kunci) }
+                koleksiDao.hitungUlangSemua()
+                _statusRealtime.update { it.copy(sinkronOtomatis = it.sinkronOtomatis + 1) }
+                Log.i(tag, "Sinkron otomatis selesai (${koleksi.size} koleksi).")
+            } finally {
+                _statusRealtime.update { it.copy(menyinkronkan = false) }
+            }
+        } finally {
+            kunciSinkron.unlock()
+        }
+    }
+
+    /** Catat waktu sinkron ke DataStore + status UI. */
+    private suspend fun catatSinkron() {
+        val sekarang = System.currentTimeMillis()
+        pengaturan.setSinkronTerakhir(sekarang)
+        _statusRealtime.update { it.copy(sinkronTerakhir = sekarang) }
     }
 
     // ---- Koleksi ----

@@ -61,6 +61,32 @@ class TelegramClient(
     )
     val pesanBaru: SharedFlow<TdApi.Message> = _pesanBaru.asSharedFlow()
 
+    private val _koneksi = MutableStateFlow(false)
+    /**
+     * True bila TDLib melaporkan ConnectionStateReady. Dipakai mesin
+     * realtime untuk memicu sinkron ringan saat koneksi pulih.
+     */
+    val koneksi: StateFlow<Boolean> = _koneksi.asStateFlow()
+
+    private val _judulChatBerubah = MutableSharedFlow<Pair<Long, String>>(
+        extraBufferCapacity = 8,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    /** (chatId, judulBaru) setiap UpdateChatTitle — untuk refresh nama lokal. */
+    val judulChatBerubah: SharedFlow<Pair<Long, String>> = _judulChatBerubah.asSharedFlow()
+
+    private val _infoTopikBerubah = MutableSharedFlow<Triple<Long, Int, String>>(
+        extraBufferCapacity = 16,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    /**
+     * (chatId, forumTopicId, namaBaru) setiap UpdateForumTopicInfo —
+     * untuk refresh nama koleksi yang sudah dikenal. Tidak pernah
+     * membuat koleksi baru dari topik asing.
+     */
+    val infoTopikBerubah: SharedFlow<Triple<Long, Int, String>> =
+        _infoTopikBerubah.asSharedFlow()
+
     private val _galat = MutableSharedFlow<String>(
         extraBufferCapacity = 8,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
@@ -175,7 +201,16 @@ class TelegramClient(
                 _pesanTerkirim.tryEmit(PesanTerkirim(obj.message, obj.oldMessageId))
             }
             is TdApi.UpdateNewMessage -> _pesanBaru.tryEmit(obj.message)
-            is TdApi.UpdateConnectionState -> Unit
+            is TdApi.UpdateConnectionState ->
+                _koneksi.value = obj.state is TdApi.ConnectionStateReady
+            is TdApi.UpdateChatTitle ->
+                _judulChatBerubah.tryEmit(obj.chatId to obj.title)
+            is TdApi.UpdateForumTopicInfo -> {
+                val info = obj.info ?: return
+                _infoTopikBerubah.tryEmit(
+                    Triple(info.chatId, info.forumTopicId, info.name.orEmpty()),
+                )
+            }
             else -> Unit
         }
     }

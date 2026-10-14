@@ -15,6 +15,7 @@ import com.arsipsenja.data.local.BerkasArsipEntity
 import com.arsipsenja.data.repo.ArsipRepository
 import com.arsipsenja.data.repo.GalatButuhVaultBaru
 import com.arsipsenja.data.repo.PenjagaVault
+import com.arsipsenja.data.repo.StatusRealtime
 import com.arsipsenja.data.telegram.TelegramException
 import com.arsipsenja.util.ArahUrut
 import com.arsipsenja.util.StatusLokal
@@ -116,6 +117,9 @@ class DasborViewModel(
 
     val tampilan: StateFlow<TampilanDasbor> = pengaturan.tampilanDasbor
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TampilanDasbor.KISI)
+
+    /** Status mesin realtime untuk indikator + dialog progres di header. */
+    val statusRealtime: StateFlow<StatusRealtime> = repo.statusRealtime
 
     init {
         viewModelScope.launch {

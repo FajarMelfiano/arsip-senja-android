@@ -54,6 +54,7 @@ import com.arsipsenja.ui.components.PopupStatus
 import com.arsipsenja.ui.components.StatistikArsip
 import com.arsipsenja.ui.components.TombolCadangan
 import com.arsipsenja.ui.components.TombolUtama
+import com.arsipsenja.ui.components.formatJam
 import com.arsipsenja.ui.icons.ArsipIcons
 import com.arsipsenja.ui.theme.Fraunces
 import com.arsipsenja.ui.theme.WarnaArsip
@@ -101,6 +102,7 @@ fun PengaturanScreen() {
     val memuatVault by vm.memuatVault.collectAsState()
     val pesanVault by vm.pesanVault.collectAsState()
     val infoVault by vm.infoVault.collectAsState()
+    val statusRealtime by vm.statusRealtime.collectAsState()
     val namaVaultAktif = infoVault?.nama
         ?: kandidatVault.firstOrNull { it.chatId == vaultAktif }?.nama
         ?: if (vaultAktif != null) "Grup ${vaultAktif}" else "Belum dipilih"
@@ -356,6 +358,11 @@ fun PengaturanScreen() {
             teks = "Sinkronkan semua koleksi",
             ikon = ArsipIcons.RefreshCw,
             onClick = vm::sinkronSemua,
+        )
+        Spacer(Modifier.height(10.dp))
+        BarisLabel(
+            "Terakhir diperbarui",
+            statusRealtime.sinkronTerakhir?.let { formatJam(it) } ?: "Belum pernah",
         )
         Spacer(Modifier.height(10.dp))
         TombolCadangan(

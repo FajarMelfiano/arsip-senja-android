@@ -67,6 +67,8 @@ class ArsipSenjaApp : Application(), Configuration.Provider {
             // Satu subsistem gagal tidak boleh membunuh seluruh aplikasi.
             android.util.Log.e("ArsipSenjaApp", "mulaiSesi gagal", e)
         }
+        // Mesin realtime: ingest pesan baru otomatis selama aplikasi hidup.
+        wadah.arsipRepository.mulaiRealtime()
     }
 
     companion object {

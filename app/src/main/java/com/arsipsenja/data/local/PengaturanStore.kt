@@ -101,6 +101,18 @@ class PengaturanStore(private val context: Context) {
 
     suspend fun tampilanSekarang(): TampilanDasbor = tampilanDasbor.first()
 
+    // ---- Sinkron terakhir (untuk debounce sinkron otomatis) ----
+
+    /** Waktu sinkron terakhir yang berhasil (epoch ms); null bila belum pernah. */
+    val aliranSinkronTerakhir: Flow<Long?> =
+        store.data.map { p -> p[KUNCI_SINKRON_TERAKHIR] }
+
+    suspend fun sinkronTerakhir(): Long? = aliranSinkronTerakhir.first()
+
+    suspend fun setSinkronTerakhir(ms: Long) {
+        store.edit { it[KUNCI_SINKRON_TERAKHIR] = ms }
+    }
+
     // ---- Rahasia Telegram ----
 
     fun apiId(): Int? = amanah.getString(KUNCI_API_ID, null)?.toIntOrNull()
@@ -143,6 +155,7 @@ class PengaturanStore(private val context: Context) {
         val KUNCI_ARAH = stringPreferencesKey("arah_urut")
         val KUNCI_BIOMETRIK = booleanPreferencesKey("biometrik_aktif")
         val KUNCI_VAULT = longPreferencesKey("vault_chat_id")
+        val KUNCI_SINKRON_TERAKHIR = longPreferencesKey("sinkron_terakhir")
         const val KUNCI_API_ID = "telegram_api_id"
         const val KUNCI_API_HASH = "telegram_api_hash"
         const val KUNCI_DB = "kunci_db_tdlib"

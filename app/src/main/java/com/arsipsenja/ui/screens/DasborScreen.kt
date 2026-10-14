@@ -59,9 +59,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.arsipsenja.data.local.BerkasArsipEntity
 import com.arsipsenja.data.local.KoleksiEntity
+import com.arsipsenja.data.repo.StatusRealtime
 import com.arsipsenja.ui.components.BagianKunciBaru
 import com.arsipsenja.ui.components.BarisKatalog
 import com.arsipsenja.ui.components.ChipArsip
+import com.arsipsenja.ui.components.DialogRealtime
 import com.arsipsenja.ui.components.KartuKatalog
 import com.arsipsenja.ui.components.KeadaanKosong
 import com.arsipsenja.ui.components.KolomCari
@@ -72,6 +74,7 @@ import com.arsipsenja.ui.components.SheetBukaKunci
 import com.arsipsenja.ui.components.StatistikArsip
 import com.arsipsenja.ui.components.TombolIkon
 import com.arsipsenja.ui.components.TombolUtama
+import com.arsipsenja.ui.components.formatJam
 import com.arsipsenja.ui.components.perangkatDukungBiometrik
 import com.arsipsenja.ui.icons.ArsipIcons
 import com.arsipsenja.ui.theme.Fraunces
@@ -98,6 +101,7 @@ fun DasborScreen(onBukaBerkas: (String) -> Unit, onBukaImpor: () -> Unit = {}) {
     val memuat by vm.memuat.collectAsState()
     val pesan by vm.pesan.collectAsState()
     val progres by vm.progres.collectAsState()
+    val statusRealtime by vm.statusRealtime.collectAsState()
     val antreanBuat by vm.antreanBuat.collectAsState()
     val antreanTarik by vm.antreanTarik.collectAsState()
     val semuaNamaKoleksi by vm.semuaNamaKoleksi.collectAsState()
@@ -106,6 +110,7 @@ fun DasborScreen(onBukaBerkas: (String) -> Unit, onBukaImpor: () -> Unit = {}) {
     var kelolaKoleksi by remember { mutableStateOf(false) }
     var menuUrutTerbuka by remember { mutableStateOf(false) }
     var pilihSinkron by remember { mutableStateOf(false) }
+    var dialogRealtime by remember { mutableStateOf(false) }
     var bukaUntuk by remember { mutableStateOf<KoleksiEntity?>(null) }
     var tertundaBerkasId by remember { mutableStateOf<String?>(null) }
 
@@ -141,10 +146,19 @@ fun DasborScreen(onBukaBerkas: (String) -> Unit, onBukaImpor: () -> Unit = {}) {
             jumlahBerkas = statistik.jumlah,
             tampilan = tampilan,
             memuat = memuat,
+            statusRealtime = statusRealtime,
             onSinkron = { pilihSinkron = true },
             onKelola = { kelolaKoleksi = true },
             onGantiTampilan = vm::gantiTampilan,
+            onBukaRealtime = { dialogRealtime = true },
         )
+
+        if (dialogRealtime) {
+            DialogRealtime(
+                status = statusRealtime,
+                onTutup = { dialogRealtime = false },
+            )
+        }
 
         // Progres sinkron terpilih: caption teks inline, bukan popup —
         // popup per koleksi akan menumpuk dan memaksa ketuk berkali-kali.
@@ -340,9 +354,11 @@ private fun KepalaDasbor(
     jumlahBerkas: Int,
     tampilan: TampilanDasbor,
     memuat: Boolean,
+    statusRealtime: StatusRealtime,
     onSinkron: () -> Unit,
     onKelola: () -> Unit,
     onGantiTampilan: () -> Unit,
+    onBukaRealtime: () -> Unit,
 ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
@@ -356,7 +372,22 @@ private fun KepalaDasbor(
                 style = MaterialTheme.typography.bodySmall,
                 color = WarnaArsip.Tinta3,
             )
+            Text(
+                text = teksStatusSinkron(statusRealtime),
+                style = MaterialTheme.typography.bodySmall,
+                color = warnaStatusSinkron(statusRealtime),
+            )
         }
+        TombolIkon(
+            ikon = ArsipIcons.LoaderCircle,
+            aksi = "Progres sinkron otomatis",
+            tint = when {
+                statusRealtime.menyinkronkan -> WarnaArsip.Amber
+                statusRealtime.tersambung -> WarnaArsip.Sukses
+                else -> WarnaArsip.Tinta3
+            },
+            onClick = onBukaRealtime,
+        )
         TombolIkon(
             ikon = ArsipIcons.RefreshCw,
             aksi = "Sinkronkan arsip",
@@ -375,6 +406,22 @@ private fun KepalaDasbor(
         )
     }
 }
+
+/**
+ * Satu baris status jujur di bawah "N berkas terindeks":
+ * - sinkron berjalan → "Menyinkronkan…",
+ * - sudah pernah sinkron → "Terakhir diperbarui HH:mm",
+ * - belum pernah & belum tersambung → "Menghubungkan…".
+ */
+private fun teksStatusSinkron(status: StatusRealtime): String = when {
+    status.menyinkronkan -> "Menyinkronkan…"
+    status.sinkronTerakhir != null -> "Terakhir diperbarui ${formatJam(status.sinkronTerakhir)}"
+    !status.tersambung -> "Menghubungkan…"
+    else -> "Sinkron otomatis aktif"
+}
+
+private fun warnaStatusSinkron(status: StatusRealtime) =
+    if (status.menyinkronkan) WarnaArsip.Amber else WarnaArsip.Tinta3
 
 @Composable
 private fun BarisFilterTipe(tipe: TipeFile?, onPilih: (TipeFile?) -> Unit) {
