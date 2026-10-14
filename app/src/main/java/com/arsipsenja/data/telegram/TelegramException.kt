@@ -5,7 +5,7 @@ import org.drinkless.tdlib.TdApi
 /**
  * Galat yang berasal dari TDLib atau dari lapisan pembungkusnya.
  */
-class TelegramException(
+open class TelegramException(
     val pesan: String,
     val kode: Int = 0,
     cause: Throwable? = null,
