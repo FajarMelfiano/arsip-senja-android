@@ -36,6 +36,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -43,7 +44,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -638,17 +638,18 @@ class ArsipRepository(
 
     /** Kumpulkan pesan baru dalam jendela batch, lalu ingest sekaligus. */
     private suspend fun kolektorPesanBatch() {
+        val konteks = currentCoroutineContext()
         val antre = Channel<TdApi.Message>(Channel.UNLIMITED)
         val pemompa = lingkupRealtime.launch {
             telegram.pesanBaru.collect { antre.trySend(it) }
         }
         val batch = mutableListOf<TdApi.Message>()
         try {
-            while (coroutineContext.isActive) {
+            while (konteks.isActive) {
                 batch += antre.receive()
                 // Tunggu kiriman susulan dalam jendela; timeout = batch siap di-ingest.
                 withTimeoutOrNull(AturanRealtime.JENDELA_BATCH_MS) {
-                    while (coroutineContext.isActive) batch += antre.receive()
+                    while (konteks.isActive) batch += antre.receive()
                 }
                 val isi = batch.toList()
                 batch.clear()
