@@ -35,7 +35,7 @@ data class BerkasArsipEntity(
     val mime: String,
     /** Nilai [com.arsipsenja.util.TipeFile]. */
     val tipe: String,
-    @ColumnInfo(defaultValue = "0") val nomorKatalog: Int,
+    @ColumnInfo(defaultValue = "0") val nomorKatalog: Int = 0,
     /** Identitas file di TDLib untuk unduh. */
     val tdFileId: Int,
     /** Jalur berkas lokal bila sudah tersedia di perangkat. */
