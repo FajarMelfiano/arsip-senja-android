@@ -31,4 +31,12 @@ interface TautanDao {
 
     @Query("DELETE FROM tautan WHERE chatId = :chatId")
     suspend fun hapusUntukChat(chatId: Long)
+
+    @Query(
+        """
+        DELETE FROM tautan WHERE berkasId IN
+            (SELECT id FROM berkas_arsip WHERE koleksiId = :chatId AND topicId = :topicId)
+        """,
+    )
+    suspend fun hapusUntukKoleksi(chatId: Long, topicId: Int)
 }

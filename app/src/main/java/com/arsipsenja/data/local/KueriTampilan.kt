@@ -23,7 +23,7 @@ data class KueriDibangun(
 data class KueriTampilan(
     val kata: String? = null,
     val tipe: TipeFile? = null,
-    val koleksiId: Long? = null,
+    val kunciKoleksi: KunciKoleksi? = null,
     val urut: UrutBerkas = UrutBerkas.TANGGAL,
     val arah: ArahUrut = ArahUrut.TURUN,
 ) {
@@ -40,9 +40,17 @@ data class KueriTampilan(
             klausa += "tipe = ?"
             argumen += tipe.name
         }
-        if (koleksiId != null) {
+        if (kunciKoleksi != null) {
             klausa += "koleksiId = ?"
-            argumen += koleksiId
+            argumen += kunciKoleksi.chatId
+            if (kunciKoleksi.adalahTopik) {
+                klausa += "topicId = ?"
+                argumen += kunciKoleksi.topicId
+            } else {
+                // Channel lama: topicId selalu 0 — filter eksplisit agar tak
+                // tercampur baris topik bila chatId suatu saat dipakai ulang.
+                klausa += "topicId = 0"
+            }
         }
 
         val kolomUrut = when (urut) {

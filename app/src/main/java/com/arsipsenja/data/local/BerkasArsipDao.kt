@@ -22,11 +22,11 @@ interface BerkasArsipDao {
     @RawQuery(observedEntities = [BerkasArsipEntity::class])
     fun alirDaftar(query: SupportSQLiteQuery): Flow<List<BerkasArsipEntity>>
 
-    @Query("SELECT COUNT(*) FROM berkas_arsip WHERE koleksiId = :koleksiId")
-    fun alirJumlah(koleksiId: Long): Flow<Int>
+    @Query("SELECT COUNT(*) FROM berkas_arsip WHERE koleksiId = :koleksiId AND topicId = :topicId")
+    fun alirJumlah(koleksiId: Long, topicId: Int): Flow<Int>
 
-    @Query("SELECT COUNT(*) FROM berkas_arsip WHERE koleksiId = :koleksiId")
-    suspend fun jumlah(koleksiId: Long): Int
+    @Query("SELECT COUNT(*) FROM berkas_arsip WHERE koleksiId = :koleksiId AND topicId = :topicId")
+    suspend fun jumlah(koleksiId: Long, topicId: Int): Int
 
     @Query(
         """
@@ -50,11 +50,14 @@ interface BerkasArsipDao {
     @Query("UPDATE berkas_arsip SET tdLocalPath = :path WHERE id = :id")
     suspend fun tandaiLokal(id: String, path: String?)
 
+    @Query("UPDATE berkas_arsip SET thumbPath = :path WHERE id = :id")
+    suspend fun aturThumb(id: String, path: String?)
+
     @Query("UPDATE berkas_arsip SET messageId = :messageId, id = :idBaru WHERE id = :idLama")
     suspend fun perbaikiId(idLama: String, idBaru: String, messageId: Long)
 
-    @Query("DELETE FROM berkas_arsip WHERE koleksiId = :koleksiId")
-    suspend fun hapusUntukKoleksi(koleksiId: Long)
+    @Query("DELETE FROM berkas_arsip WHERE koleksiId = :koleksiId AND topicId = :topicId")
+    suspend fun hapusUntukKoleksi(koleksiId: Long, topicId: Int)
 
     @Query("DELETE FROM berkas_arsip WHERE id = :id")
     suspend fun hapus(id: String)

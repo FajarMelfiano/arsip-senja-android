@@ -14,6 +14,7 @@ import androidx.room.PrimaryKey
     indices = [
         Index(value = ["chatId"]),
         Index(value = ["koleksiId"]),
+        Index(value = ["koleksiId", "topicId"]),
         Index(value = ["nama"]),
         Index(value = ["tanggal"]),
     ],
@@ -25,6 +26,8 @@ data class BerkasArsipEntity(
     val chatId: Long,
     /** Channel/koleksi tempat berkas berada; null bila yatim. */
     val koleksiId: Long?,
+    /** Id topik forum; 0 untuk channel lama / tanpa topik. */
+    val topicId: Int = 0,
     val nama: String,
     val ukuran: Long,
     /** Epoch millis. */
@@ -37,6 +40,10 @@ data class BerkasArsipEntity(
     val tdFileId: Int,
     /** Jalur berkas lokal bila sudah tersedia di perangkat. */
     val tdLocalPath: String?,
+    /** Identitas file thumbnail di TDLib; 0 bila pesan tak punya thumbnail. */
+    @ColumnInfo(defaultValue = "0") val tdThumbFileId: Int = 0,
+    /** Jalur thumbnail lokal (filesDir/thumbs) bila sudah diunduh. */
+    val thumbPath: String? = null,
     val deskripsi: String?,
     val dibuatPada: Long,
 ) {

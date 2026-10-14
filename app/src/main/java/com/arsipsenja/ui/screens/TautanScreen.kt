@@ -111,7 +111,9 @@ fun TautanScreen() {
                     .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                koleksi.forEach { k ->
+                // Tautan undangan Telegram bersifat per-chat (bukan per-topik),
+                // jadi satu chip per chatId unik meski vault punya banyak topik.
+                koleksi.distinctBy { it.chatId }.forEach { k ->
                     ChipArsip(
                         label = k.nama,
                         terpilih = koleksiDipilih == k.chatId,

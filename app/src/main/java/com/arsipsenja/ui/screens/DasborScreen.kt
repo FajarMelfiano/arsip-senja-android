@@ -26,14 +26,19 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.window.Dialog
+import com.arsipsenja.data.local.KunciKoleksi
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -83,6 +88,7 @@ fun DasborScreen(onBukaBerkas: (String) -> Unit) {
 
     var kelolaKoleksi by remember { mutableStateOf(false) }
     var menuUrutTerbuka by remember { mutableStateOf(false) }
+    var pilihSinkron by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -100,7 +106,7 @@ fun DasborScreen(onBukaBerkas: (String) -> Unit) {
             jumlahBerkas = statistik.jumlah,
             tampilan = tampilan,
             memuat = memuat,
-            onSinkron = vm::sinkron,
+            onSinkron = { pilihSinkron = true },
             onKelola = { kelolaKoleksi = true },
             onGantiTampilan = vm::gantiTampilan,
         )
@@ -126,7 +132,7 @@ fun DasborScreen(onBukaBerkas: (String) -> Unit) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             BarisFilterKoleksi(
                 koleksi = koleksi,
-                terpilih = saringan.koleksiId,
+                terpilih = saringan.kunciKoleksi,
                 onPilih = vm::saringKoleksi,
                 modifier = Modifier.weight(1f),
             )
@@ -151,14 +157,14 @@ fun DasborScreen(onBukaBerkas: (String) -> Unit) {
         if (berkas.isEmpty()) {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
                 item {
-                    if (kata.isBlank() && saringan.tipe == null && saringan.koleksiId == null) {
+                    if (kata.isBlank() && saringan.tipe == null && saringan.kunciKoleksi == null) {
                         KeadaanKosong(
                             ikon = ArsipIcons.Inbox,
                             judul = "Arsip masih kosong",
                             pesan = "Tarik riwayat koleksi Telegram untuk mengisi katalog, " +
                                 "atau unggah berkas pertamamu dari layar Unggah.",
                             aksiLabel = "Sinkronkan sekarang",
-                            onAksi = vm::sinkron,
+                            onAksi = { pilihSinkron = true },
                         )
                     } else {
                         KeadaanKosong(
@@ -178,18 +184,32 @@ fun DasborScreen(onBukaBerkas: (String) -> Unit) {
         } else if (tampilan == TampilanDasbor.KISI) {
             DaftarKisi(
                 daftar = berkas,
-                namaKoleksi = { id -> koleksi.firstOrNull { it.chatId == id }?.nama },
+                namaKoleksi = { kunci -> koleksi.firstOrNull { it.kunci == kunci }?.nama },
                 status = vm::statusLokal,
+                onMintaThumbnail = vm::mintaThumbnail,
                 onBuka = onBukaBerkas,
             )
         } else {
             DaftarBaris(
                 daftar = berkas,
-                namaKoleksi = { id -> koleksi.firstOrNull { it.chatId == id }?.nama },
+                namaKoleksi = { kunci -> koleksi.firstOrNull { it.kunci == kunci }?.nama },
                 status = vm::statusLokal,
+                onMintaThumbnail = vm::mintaThumbnail,
                 onBuka = onBukaBerkas,
             )
         }
+    }
+
+    if (pilihSinkron) {
+        DialogPilihKoleksi(
+            koleksi = koleksi,
+            memuat = memuat,
+            onBatal = { pilihSinkron = false },
+            onKonfirmasi = { terpilih ->
+                pilihSinkron = false
+                vm.sinkronTerpilih(terpilih)
+            },
+        )
     }
 
     if (kelolaKoleksi) {
@@ -269,8 +289,8 @@ private fun BarisFilterTipe(tipe: TipeFile?, onPilih: (TipeFile?) -> Unit) {
 @Composable
 private fun BarisFilterKoleksi(
     koleksi: List<KoleksiEntity>,
-    terpilih: Long?,
-    onPilih: (Long?) -> Unit,
+    terpilih: KunciKoleksi?,
+    onPilih: (KunciKoleksi?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -287,9 +307,9 @@ private fun BarisFilterKoleksi(
         koleksi.forEach { k ->
             ChipArsip(
                 label = k.nama,
-                terpilih = terpilih == k.chatId,
+                terpilih = terpilih == k.kunci,
                 jumlah = k.jumlahBerkas,
-                onClick = { onPilih(if (terpilih == k.chatId) null else k.chatId) },
+                onClick = { onPilih(if (terpilih == k.kunci) null else k.kunci) },
             )
         }
     }
@@ -349,8 +369,9 @@ private fun MenuUrut(
 @Composable
 private fun DaftarKisi(
     daftar: List<BerkasArsipEntity>,
-    namaKoleksi: (Long?) -> String?,
+    namaKoleksi: (KunciKoleksi) -> String?,
     status: (BerkasArsipEntity) -> com.arsipsenja.util.StatusLokal,
+    onMintaThumbnail: (BerkasArsipEntity) -> Unit,
     onBuka: (String) -> Unit,
 ) {
     LazyVerticalGrid(
@@ -364,8 +385,9 @@ private fun DaftarKisi(
         items(daftar, key = { it.id }) { berkas ->
             KartuKatalog(
                 berkas = berkas,
-                namaKoleksi = namaKoleksi(berkas.koleksiId),
+                namaKoleksi = namaKoleksi(KunciKoleksi(berkas.chatId, berkas.topicId)),
                 statusLokal = status(berkas),
+                onMintaThumbnail = onMintaThumbnail,
                 onClick = { onBuka(berkas.id) },
             )
         }
@@ -375,8 +397,9 @@ private fun DaftarKisi(
 @Composable
 private fun DaftarBaris(
     daftar: List<BerkasArsipEntity>,
-    namaKoleksi: (Long?) -> String?,
+    namaKoleksi: (KunciKoleksi) -> String?,
     status: (BerkasArsipEntity) -> com.arsipsenja.util.StatusLokal,
+    onMintaThumbnail: (BerkasArsipEntity) -> Unit,
     onBuka: (String) -> Unit,
 ) {
     LazyColumn(
@@ -387,10 +410,165 @@ private fun DaftarBaris(
         items(daftar, key = { it.id }) { berkas ->
             BarisKatalog(
                 berkas = berkas,
-                namaKoleksi = namaKoleksi(berkas.koleksiId),
+                namaKoleksi = namaKoleksi(KunciKoleksi(berkas.chatId, berkas.topicId)),
                 statusLokal = status(berkas),
+                onMintaThumbnail = onMintaThumbnail,
                 onClick = { onBuka(berkas.id) },
             )
+        }
+    }
+}
+
+// ---------------------------------------------------------------------
+// Dialog pilih koleksi untuk sinkronisasi
+// ---------------------------------------------------------------------
+
+/**
+ * Dialog multi-pilih koleksi: pengguna mencentang koleksi yang mau
+ * disinkron, lalu sinkronisasi berjalan otomatis untuk yang terpilih.
+ */
+@Composable
+private fun DialogPilihKoleksi(
+    koleksi: List<KoleksiEntity>,
+    memuat: Boolean,
+    onBatal: () -> Unit,
+    onKonfirmasi: (List<KunciKoleksi>) -> Unit,
+) {
+    var terpilih by remember(koleksi) {
+        mutableStateOf(koleksi.map { it.kunci }.toSet())
+    }
+    val semuaTerpilih = koleksi.isNotEmpty() && terpilih.size == koleksi.size
+
+    Dialog(onDismissRequest = onBatal) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = WarnaArsip.Veil,
+            contentColor = WarnaArsip.Tinta,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+            ) {
+                Text(
+                    text = "Pilih koleksi",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = WarnaArsip.Tinta,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "Centang koleksi yang mau disinkron — " +
+                        "sinkronisasi berjalan otomatis setelahnya.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = WarnaArsip.Tinta2,
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Checkbox(
+                        checked = semuaTerpilih,
+                        onCheckedChange = { ya ->
+                            terpilih = if (ya) koleksi.map { it.kunci }.toSet() else emptySet()
+                        },
+                        colors = CheckboxDefaults.colors(
+                            checkedColor = WarnaArsip.Amber,
+                            checkmarkColor = WarnaArsip.Kanvas,
+                        ),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = "Pilih semua (${koleksi.size})",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = WarnaArsip.Tinta,
+                    )
+                }
+
+                if (koleksi.isEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    KeadaanKosong(
+                        ikon = ArsipIcons.Folder,
+                        judul = "Belum ada koleksi",
+                        pesan = "Buat koleksi dulu atau tarik daftar dari Telegram.",
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(300.dp),
+                    ) {
+                        items(koleksi, key = { it.kunci.toString() }) { k ->
+                            val dicentang = k.kunci in terpilih
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                            ) {
+                                Checkbox(
+                                    checked = dicentang,
+                                    onCheckedChange = { ya ->
+                                        terpilih = if (ya) terpilih + k.kunci
+                                        else terpilih - k.kunci
+                                    },
+                                    colors = CheckboxDefaults.colors(
+                                        checkedColor = WarnaArsip.Amber,
+                                        checkmarkColor = WarnaArsip.Kanvas,
+                                    ),
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Icon(
+                                    imageVector = ArsipIcons.Folder,
+                                    contentDescription = null,
+                                    tint = WarnaArsip.VioletTerang,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        text = k.nama,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = WarnaArsip.Tinta,
+                                        maxLines = 1,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        text = "${k.jumlahBerkas} berkas" +
+                                            (if (k.adalahTopik) " · topik" else ""),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = WarnaArsip.Tinta3,
+                                        maxLines = 1,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextButton(onClick = onBatal) {
+                        Text("Batal", color = WarnaArsip.Tinta2)
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    TombolUtama(
+                        teks = if (terpilih.isEmpty()) "Sinkron"
+                        else "Sinkron (${terpilih.size})",
+                        ikon = ArsipIcons.RefreshCw,
+                        aktif = terpilih.isNotEmpty() && !memuat,
+                        penuh = false,
+                        onClick = { onKonfirmasi(terpilih.toList()) },
+                    )
+                }
+            }
         }
     }
 }
@@ -450,8 +628,8 @@ private fun LembarKoleksi(
             }
             Spacer(Modifier.height(6.dp))
             Text(
-                text = "Setiap koleksi adalah channel privat Telegram — rak arsip " +
-                    "yang bisa kamu namai sendiri.",
+                text = "Setiap koleksi dibuat sebagai topik di vault Telegram — " +
+                    "rak arsip yang bisa kamu namai sendiri.",
                 style = MaterialTheme.typography.bodySmall,
                 color = WarnaArsip.Tinta2,
             )
@@ -514,7 +692,7 @@ private fun LembarKoleksi(
                     BarisKoleksi(
                         koleksi = k,
                         onUbah = { diedit = k },
-                        onHapus = { vm.hapusKoleksi(k.chatId, tinggalkanChannel = false) },
+                        onHapus = { vm.hapusKoleksi(k.kunci, tinggalkanChannel = false) },
                     )
                     Spacer(Modifier.height(8.dp))
                 }
@@ -526,11 +704,11 @@ private fun LembarKoleksi(
         DialogUbahKoleksi(
             koleksi = k,
             onSimpan = { nama, deskripsi ->
-                vm.ubahKoleksi(k.chatId, nama, deskripsi)
+                vm.ubahKoleksi(k.kunci, nama, deskripsi)
                 diedit = null
             },
             onHapus = {
-                vm.hapusKoleksi(k.chatId, tinggalkanChannel = false)
+                vm.hapusKoleksi(k.kunci, tinggalkanChannel = false)
                 diedit = null
             },
             onTutup = { diedit = null },

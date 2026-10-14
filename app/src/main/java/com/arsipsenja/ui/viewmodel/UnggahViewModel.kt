@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import com.arsipsenja.data.local.KoleksiEntity
+import com.arsipsenja.data.local.KunciKoleksi
 import com.arsipsenja.data.repo.ArsipRepository
 import com.arsipsenja.data.telegram.ProgresBerkas
 import com.arsipsenja.data.telegram.TelegramClient
@@ -32,8 +33,8 @@ class UnggahViewModel(
     val koleksi: StateFlow<List<KoleksiEntity>> = repo.alirKoleksi()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    private val _koleksiTerpilih = MutableStateFlow<Long?>(null)
-    val koleksiTerpilih: StateFlow<Long?> = _koleksiTerpilih.asStateFlow()
+    private val _koleksiTerpilih = MutableStateFlow<KunciKoleksi?>(null)
+    val koleksiTerpilih: StateFlow<KunciKoleksi?> = _koleksiTerpilih.asStateFlow()
 
     private val _pesan = MutableStateFlow<String?>(null)
     val pesan: StateFlow<String?> = _pesan.asStateFlow()
@@ -66,14 +67,14 @@ class UnggahViewModel(
         viewModelScope.launch {
             repo.alirKoleksi().collect { daftar ->
                 if (_koleksiTerpilih.value == null) {
-                    _koleksiTerpilih.value = daftar.firstOrNull()?.chatId
+                    _koleksiTerpilih.value = daftar.firstOrNull()?.kunci
                 }
             }
         }
     }
 
-    fun pilihKoleksi(chatId: Long?) {
-        _koleksiTerpilih.value = chatId
+    fun pilihKoleksi(kunci: KunciKoleksi?) {
+        _koleksiTerpilih.value = kunci
     }
 
     /** Antrekan URI SAF terpilih ke koleksi tujuan. */
@@ -87,8 +88,14 @@ class UnggahViewModel(
             _pesan.value = "Belum ada berkas yang dipilih."
             return
         }
-        repo.mulaiUnggah(uris, tujuan)
-        _pesan.value = "${uris.size} berkas masuk antrean unggah."
+        viewModelScope.launch {
+            try {
+                repo.mulaiUnggah(uris, tujuan)
+                _pesan.value = "${uris.size} berkas masuk antrean unggah."
+            } catch (e: Exception) {
+                _pesan.value = "Gagal mengantre unggah: ${e.message}"
+            }
+        }
     }
 
     fun batalkan(id: UUID) {
@@ -108,8 +115,8 @@ class UnggahViewModel(
 
     /** Gabungkan nama koleksi terpilih untuk label layar. */
     val namaKoleksiTerpilih: StateFlow<String?> =
-        combine(koleksi, _koleksiTerpilih) { daftar, id ->
-            daftar.firstOrNull { it.chatId == id }?.nama
+        combine(koleksi, _koleksiTerpilih) { daftar, kunci ->
+            daftar.firstOrNull { it.kunci == kunci }?.nama
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     companion object {

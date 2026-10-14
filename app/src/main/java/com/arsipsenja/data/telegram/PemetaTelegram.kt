@@ -15,6 +15,8 @@ data class BerkasMentah(
     val tipe: TipeFile,
     val tdFileId: Int,
     val tdLocalPath: String?,
+    /** Id file thumbnail TDLib; 0 bila tak ada. */
+    val tdThumbFileId: Int = 0,
     val caption: String?,
 )
 
@@ -37,6 +39,7 @@ fun TdApi.Message.keBerkasMentah(): BerkasMentah? {
                 tipe = TipeFile.dariMime(d.mimeType, d.fileName.orEmpty()),
                 tdFileId = d.document?.id ?: 0,
                 tdLocalPath = d.document?.local?.path,
+                tdThumbFileId = d.thumbnail?.file?.id ?: 0,
                 caption = isi.caption?.text,
             )
         }
@@ -52,6 +55,7 @@ fun TdApi.Message.keBerkasMentah(): BerkasMentah? {
                 tipe = TipeFile.VIDEO,
                 tdFileId = v.video?.id ?: 0,
                 tdLocalPath = v.video?.local?.path,
+                tdThumbFileId = v.thumbnail?.file?.id ?: 0,
                 caption = isi.caption?.text,
             )
         }
@@ -67,12 +71,14 @@ fun TdApi.Message.keBerkasMentah(): BerkasMentah? {
                 tipe = TipeFile.AUDIO,
                 tdFileId = a.audio?.id ?: 0,
                 tdLocalPath = a.audio?.local?.path,
+                tdThumbFileId = a.albumCoverThumbnail?.file?.id ?: 0,
                 caption = isi.caption?.text ?: a.title,
             )
         }
         is TdApi.MessagePhoto -> {
             val p = isi.photo ?: return null
-            val terbesar = p.sizes?.lastOrNull() ?: return null
+            val terbesar = p.sizes?.maxByOrNull { it.width * it.height } ?: return null
+            val terkecil = p.sizes?.minByOrNull { it.width * it.height }
             val file = terbesar.photo ?: return null
             BerkasMentah(
                 chatId = chatId,
@@ -84,6 +90,7 @@ fun TdApi.Message.keBerkasMentah(): BerkasMentah? {
                 tipe = TipeFile.GAMBAR,
                 tdFileId = file.id,
                 tdLocalPath = file.local?.path,
+                tdThumbFileId = terkecil?.photo?.id ?: 0,
                 caption = isi.caption?.text,
             )
         }
@@ -99,6 +106,7 @@ fun TdApi.Message.keBerkasMentah(): BerkasMentah? {
                 tipe = TipeFile.GAMBAR,
                 tdFileId = g.animation?.id ?: 0,
                 tdLocalPath = g.animation?.local?.path,
+                tdThumbFileId = g.thumbnail?.file?.id ?: 0,
                 caption = isi.caption?.text,
             )
         }
@@ -114,12 +122,18 @@ fun TdApi.File.ukuranTotal(): Long = when {
 }
 
 /** Ubah berkas mentah menjadi baris indeks lokal. */
-fun BerkasMentah.keEntity(koleksiId: Long?, nomorKatalog: Int, sekarang: Long): BerkasArsipEntity =
+fun BerkasMentah.keEntity(
+    koleksiId: Long?,
+    topicId: Int = 0,
+    nomorKatalog: Int,
+    sekarang: Long,
+): BerkasArsipEntity =
     BerkasArsipEntity(
         id = BerkasArsipEntity.kunci(chatId, messageId),
         messageId = messageId,
         chatId = chatId,
         koleksiId = koleksiId,
+        topicId = topicId,
         nama = nama,
         ukuran = ukuran,
         tanggal = tanggal,
@@ -128,6 +142,8 @@ fun BerkasMentah.keEntity(koleksiId: Long?, nomorKatalog: Int, sekarang: Long): 
         nomorKatalog = nomorKatalog,
         tdFileId = tdFileId,
         tdLocalPath = tdLocalPath,
+        tdThumbFileId = tdThumbFileId,
+        thumbPath = null,
         deskripsi = caption?.takeIf { it.isNotBlank() },
         dibuatPada = sekarang,
     )

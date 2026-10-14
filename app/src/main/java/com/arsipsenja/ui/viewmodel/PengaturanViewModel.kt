@@ -46,6 +46,78 @@ class PengaturanViewModel(
     val statusSesi: StateFlow<StatusOtorisasi> = telegram.status
         .stateIn(viewModelScope, SharingStarted.Eagerly, StatusOtorisasi.Menyiapkan)
 
+    // ---- Vault Telegram ----
+
+    private val _vaultAktif = MutableStateFlow<Long?>(null)
+    val vaultAktif: StateFlow<Long?> = _vaultAktif.asStateFlow()
+
+    private val _kandidatVault =
+        MutableStateFlow<List<ArsipRepository.KandidatVault>>(emptyList())
+    val kandidatVault: StateFlow<List<ArsipRepository.KandidatVault>> =
+        _kandidatVault.asStateFlow()
+
+    private val _memuatVault = MutableStateFlow(false)
+    val memuatVault: StateFlow<Boolean> = _memuatVault.asStateFlow()
+
+    private val _pesanVault = MutableStateFlow<String?>(null)
+    val pesanVault: StateFlow<String?> = _pesanVault.asStateFlow()
+
+    init {
+        muatVaultAktif()
+    }
+
+    fun muatVaultAktif() {
+        viewModelScope.launch {
+            _vaultAktif.value = runCatching { repo.vaultTerpilih() }.getOrNull()
+        }
+    }
+
+    fun muatKandidatVault() {
+        viewModelScope.launch {
+            _memuatVault.value = true
+            try {
+                _kandidatVault.value = repo.daftarKandidatVault()
+                _pesanVault.value = null
+            } catch (e: Exception) {
+                _pesanVault.value = "Gagal memuat grup: ${e.message}"
+            } finally {
+                _memuatVault.value = false
+            }
+        }
+    }
+
+    fun pilihVault(chatId: Long) {
+        viewModelScope.launch {
+            try {
+                repo.pilihVault(chatId)
+                _vaultAktif.value = chatId
+                _pesanVault.value = "Vault diganti. Koleksi baru akan dibuat sebagai topik di grup ini."
+            } catch (e: Exception) {
+                _pesanVault.value = "Gagal memilih vault: ${e.message}"
+            }
+        }
+    }
+
+    fun buatVaultBaru(nama: String) {
+        val bersih = nama.trim().ifBlank { "Arsip Senja" }
+        viewModelScope.launch {
+            _memuatVault.value = true
+            try {
+                val chatId = repo.buatVaultBaru(bersih)
+                _vaultAktif.value = chatId
+                _pesanVault.value = "Vault \"$bersih\" dibuat dan dijadikan aktif."
+            } catch (e: Exception) {
+                _pesanVault.value = "Gagal membuat vault: ${e.message}"
+            } finally {
+                _memuatVault.value = false
+            }
+        }
+    }
+
+    fun habiskanPesanVault() {
+        _pesanVault.value = null
+    }
+
     private val _adaKredensial = MutableStateFlow(pengaturan.adaKredensial())
     val adaKredensial: StateFlow<Boolean> = _adaKredensial.asStateFlow()
 

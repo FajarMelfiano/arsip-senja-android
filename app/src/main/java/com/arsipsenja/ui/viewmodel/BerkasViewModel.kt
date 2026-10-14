@@ -8,6 +8,7 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import com.arsipsenja.data.local.BerkasArsipEntity
 import com.arsipsenja.data.local.KoleksiEntity
+import com.arsipsenja.data.local.KunciKoleksi
 import com.arsipsenja.data.local.PengaturanStore
 import com.arsipsenja.data.local.TautanEntity
 import com.arsipsenja.data.repo.ArsipRepository
@@ -44,7 +45,8 @@ class BerkasViewModel(
 
     val koleksi: StateFlow<KoleksiEntity?> = berkas
         .flatMapLatest { b ->
-            if (b == null) flowOf(null) else repo.alirKoleksi(b.chatId)
+            if (b == null) flowOf(null)
+            else repo.alirKoleksi(KunciKoleksi(b.chatId, b.topicId))
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 

@@ -5,6 +5,7 @@ package com.arsipsenja.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.arsipsenja.data.local.KoleksiEntity
+import com.arsipsenja.data.local.KunciKoleksi
 import com.arsipsenja.data.local.KueriTampilan
 import com.arsipsenja.data.local.PengaturanStore
 import com.arsipsenja.data.local.StatistikBerkas
@@ -50,8 +51,8 @@ class DasborViewModel(
     private val _pesan = MutableStateFlow<String?>(null)
     val pesan: StateFlow<String?> = _pesan.asStateFlow()
 
-    private val _koleksiAktif = MutableStateFlow<Long?>(null)
-    val koleksiAktif: StateFlow<Long?> = _koleksiAktif.asStateFlow()
+    private val _koleksiAktif = MutableStateFlow<KunciKoleksi?>(null)
+    val koleksiAktif: StateFlow<KunciKoleksi?> = _koleksiAktif.asStateFlow()
 
     val berkas: StateFlow<List<BerkasArsipEntity>> =
         combine(_kata.debounce(250), _saringan) { kata, kueri ->
@@ -85,9 +86,9 @@ class DasborViewModel(
         _saringan.update { it.copy(tipe = tipe) }
     }
 
-    fun saringKoleksi(chatId: Long?) {
-        _koleksiAktif.value = chatId
-        _saringan.update { it.copy(koleksiId = chatId) }
+    fun saringKoleksi(kunci: KunciKoleksi?) {
+        _koleksiAktif.value = kunci
+        _saringan.update { it.copy(kunciKoleksi = kunci) }
     }
 
     fun urutkan(urut: UrutBerkas, arah: ArahUrut) {
@@ -108,7 +109,60 @@ class DasborViewModel(
     fun statusLokal(berkas: BerkasArsipEntity): StatusLokal =
         if (!berkas.tdLocalPath.isNullOrBlank()) StatusLokal.ADA else StatusLokal.BELUM
 
+    private val thumbBerjalan = mutableSetOf<String>()
+
+    /**
+     * Minta thumbnail berkas; dipanggil sekali per kartu saat thumbnail
+     * belum ada. Guard mencegah unduhan ganda untuk id yang sama.
+     */
+    fun mintaThumbnail(berkas: BerkasArsipEntity) {
+        if (!berkas.thumbPath.isNullOrBlank() || berkas.tdThumbFileId == 0) return
+        synchronized(thumbBerjalan) {
+            if (!thumbBerjalan.add(berkas.id)) return
+        }
+        viewModelScope.launch {
+            try {
+                repo.pastikanThumbnail(berkas)
+            } catch (_: Exception) {
+                // Gagal unduh thumbnail: kartu tetap tampil dengan ikon.
+            } finally {
+                synchronized(thumbBerjalan) { thumbBerjalan.remove(berkas.id) }
+            }
+        }
+    }
+
     // ---- Sinkronisasi ----
+
+    /**
+     * Sinkronisasi terpilih: hanya koleksi yang dicentang di dialog pilih
+     * yang disinkron, satu per satu dengan progres nama koleksi.
+     */
+    fun sinkronTerpilih(kunci: List<KunciKoleksi>) {
+        if (_memuat.value || kunci.isEmpty()) return
+        viewModelScope.launch {
+            _memuat.value = true
+            try {
+                var totalBaru = 0
+                kunci.forEachIndexed { i, k ->
+                    val nama = koleksi.value.firstOrNull { it.kunci == k }?.nama
+                        ?: "koleksi ${i + 1}"
+                    _pesan.value = "Menyinkron “$nama” (${i + 1}/${kunci.size})…"
+                    totalBaru += repo.sinkronKoleksi(k)
+                }
+                _pesan.value = if (totalBaru > 0) {
+                    "Sinkronisasi selesai: $totalBaru berkas baru dari ${kunci.size} koleksi."
+                } else {
+                    "Sinkronisasi selesai: tidak ada berkas baru."
+                }
+            } catch (e: TelegramException) {
+                _pesan.value = "Sinkronisasi gagal: ${e.pesan}"
+            } catch (e: Exception) {
+                _pesan.value = "Sinkronisasi gagal: ${e.message ?: "galat tak dikenal"}"
+            } finally {
+                _memuat.value = false
+            }
+        }
+    }
 
     fun sinkron() {
         if (_memuat.value) return
@@ -161,7 +215,7 @@ class DasborViewModel(
         }
     }
 
-    fun ubahKoleksi(chatId: Long, nama: String, deskripsi: String) {
+    fun ubahKoleksi(kunci: KunciKoleksi, nama: String, deskripsi: String) {
         if (nama.isBlank()) {
             _pesan.value = "Nama koleksi belum diisi."
             return
@@ -169,7 +223,7 @@ class DasborViewModel(
         viewModelScope.launch {
             _memuat.value = true
             try {
-                repo.ubahKoleksi(chatId, nama.trim(), deskripsi.trim())
+                repo.ubahKoleksi(kunci, nama.trim(), deskripsi.trim())
                 _pesan.value = "Koleksi diperbarui."
             } catch (e: Exception) {
                 _pesan.value = "Gagal memperbarui koleksi: ${e.message}"
@@ -179,11 +233,11 @@ class DasborViewModel(
         }
     }
 
-    fun hapusKoleksi(chatId: Long, tinggalkanChannel: Boolean) {
+    fun hapusKoleksi(kunci: KunciKoleksi, tinggalkanChannel: Boolean) {
         viewModelScope.launch {
             _memuat.value = true
             try {
-                repo.hapusKoleksi(chatId, tinggalkanChannel)
+                repo.hapusKoleksi(kunci, tinggalkanChannel)
                 _pesan.value = "Koleksi dihapus dari arsip."
             } catch (e: Exception) {
                 _pesan.value = "Gagal menghapus koleksi: ${e.message}"

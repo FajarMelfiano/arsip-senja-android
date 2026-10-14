@@ -11,11 +11,11 @@ interface KoleksiDao {
     @Query("SELECT * FROM koleksi ORDER BY nama COLLATE NOCASE ASC")
     fun alirSemua(): Flow<List<KoleksiEntity>>
 
-    @Query("SELECT * FROM koleksi WHERE chatId = :chatId")
-    fun alir(chatId: Long): Flow<KoleksiEntity?>
+    @Query("SELECT * FROM koleksi WHERE chatId = :chatId AND topicId = :topicId")
+    fun alir(chatId: Long, topicId: Int): Flow<KoleksiEntity?>
 
-    @Query("SELECT * FROM koleksi WHERE chatId = :chatId")
-    suspend fun ambil(chatId: Long): KoleksiEntity?
+    @Query("SELECT * FROM koleksi WHERE chatId = :chatId AND topicId = :topicId")
+    suspend fun ambil(chatId: Long, topicId: Int): KoleksiEntity?
 
     @Upsert
     suspend fun simpan(koleksi: KoleksiEntity)
@@ -23,22 +23,24 @@ interface KoleksiDao {
     @Upsert
     suspend fun simpanSemua(koleksi: List<KoleksiEntity>)
 
-    @Query("DELETE FROM koleksi WHERE chatId = :chatId")
-    suspend fun hapus(chatId: Long)
+    @Query("DELETE FROM koleksi WHERE chatId = :chatId AND topicId = :topicId")
+    suspend fun hapus(chatId: Long, topicId: Int)
 
     @Query(
         """
         UPDATE koleksi SET jumlahBerkas =
-            (SELECT COUNT(*) FROM berkas_arsip WHERE koleksiId = :chatId)
-        WHERE chatId = :chatId
+            (SELECT COUNT(*) FROM berkas_arsip
+             WHERE koleksiId = :chatId AND topicId = :topicId)
+        WHERE chatId = :chatId AND topicId = :topicId
         """,
     )
-    suspend fun hitungUlang(chatId: Long)
+    suspend fun hitungUlang(chatId: Long, topicId: Int)
 
     @Query(
         """
         UPDATE koleksi SET jumlahBerkas =
-            (SELECT COUNT(*) FROM berkas_arsip WHERE koleksiId = koleksi.chatId)
+            (SELECT COUNT(*) FROM berkas_arsip b
+             WHERE b.koleksiId = koleksi.chatId AND b.topicId = koleksi.topicId)
         """,
     )
     suspend fun hitungUlangSemua()

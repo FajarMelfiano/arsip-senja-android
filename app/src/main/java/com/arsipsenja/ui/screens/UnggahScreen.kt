@@ -100,7 +100,7 @@ fun UnggahScreen() {
                 ikon = ArsipIcons.Folder,
                 judul = "Belum ada koleksi tujuan",
                 pesan = "Buat koleksi dari Dasbor (ikon folder) sebelum mengunggah. " +
-                    "Setiap koleksi = satu channel privat Telegram.",
+                    "Koleksi tersimpan sebagai channel privat atau topik di vault Telegram.",
             )
         } else {
             Text(
@@ -118,9 +118,9 @@ fun UnggahScreen() {
                 koleksi.forEach { k ->
                     ChipArsip(
                         label = k.nama,
-                        terpilih = terpilih == k.chatId,
+                        terpilih = terpilih == k.kunci,
                         jumlah = k.jumlahBerkas,
-                        onClick = { vm.pilihKoleksi(k.chatId) },
+                        onClick = { vm.pilihKoleksi(k.kunci) },
                     )
                 }
             }

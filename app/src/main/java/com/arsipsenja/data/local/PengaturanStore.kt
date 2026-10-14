@@ -6,6 +6,7 @@ import android.util.Base64
 import android.util.Log
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.security.crypto.EncryptedSharedPreferences
@@ -67,6 +68,20 @@ class PengaturanStore(private val context: Context) {
 
     val biometrikAktif: Flow<Boolean> = store.data.map { p -> p[KUNCI_BIOMETRIK] ?: false }
 
+    /**
+     * chatId grup vault (supergroup forum) pilihan pengguna; null bila belum dipilih.
+     * Seluruh koleksi topik tinggal di vault ini.
+     */
+    val vaultChatId: Flow<Long?> = store.data.map { p -> p[KUNCI_VAULT] }
+
+    suspend fun setVaultChatId(chatId: Long?) {
+        store.edit {
+            if (chatId == null) it.remove(KUNCI_VAULT) else it[KUNCI_VAULT] = chatId
+        }
+    }
+
+    suspend fun vaultSekarang(): Long? = vaultChatId.first()
+
     suspend fun setTampilan(tampilan: TampilanDasbor) {
         store.edit { it[KUNCI_TAMPILAN] = tampilan.name }
     }
@@ -127,6 +142,7 @@ class PengaturanStore(private val context: Context) {
         val KUNCI_URUT = stringPreferencesKey("urut_berkas")
         val KUNCI_ARAH = stringPreferencesKey("arah_urut")
         val KUNCI_BIOMETRIK = booleanPreferencesKey("biometrik_aktif")
+        val KUNCI_VAULT = longPreferencesKey("vault_chat_id")
         const val KUNCI_API_ID = "telegram_api_id"
         const val KUNCI_API_HASH = "telegram_api_hash"
         const val KUNCI_DB = "kunci_db_tdlib"

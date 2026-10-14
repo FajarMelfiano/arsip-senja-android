@@ -34,14 +34,16 @@ class UploadWorker(
         val uri = inputData.getString(K_URI)?.let(Uri::parse) ?: return Result.failure()
         val koleksiId = inputData.getLong(K_KOLEKSI, -1L)
         if (koleksiId <= 0L) return Result.failure()
+        val topikId = inputData.getInt(K_TOPIK, 0)
 
         val wadah = (applicationContext as ArsipSenjaApp).wadah
         val repo = wadah.arsipRepository
         val telegram = repo.telegram
 
-        val koleksi = repo.alirKoleksi(koleksiId).first()
+        val kunci = com.arsipsenja.data.local.KunciKoleksi(koleksiId, topikId)
+        val koleksi = repo.alirKoleksi(kunci).first()
         if (koleksi == null) {
-            Log.e(tag, "Koleksi $koleksiId tidak ada")
+            Log.e(tag, "Koleksi $kunci tidak ada")
             return Result.failure()
         }
 
@@ -54,7 +56,7 @@ class UploadWorker(
 
         try {
             val potongan = pecahBilaBerlu(berkasCache)
-            var nomorKatalog = repo.jumlahBerkas(koleksiId)
+            var nomorKatalog = repo.jumlahBerkas(kunci)
 
             for ((indeks, potonganFile) in potongan.withIndex()) {
                 val namaPotongan = if (potongan.size == 1) {
@@ -68,6 +70,7 @@ class UploadWorker(
                         path = potonganFile.absolutePath,
                         tipe = tipe,
                         caption = if (indeks == 0) "Unggah manual" else "",
+                        topicId = koleksi.topicId,
                     )
 
                     pantauProgresUnggah(
@@ -80,7 +83,12 @@ class UploadWorker(
                     val mentah = dikonfirmasi.pesan.keBerkasMentah() ?: continue
                     nomorKatalog += 1
                     val entri = mentah
-                        .keEntity(koleksiId = koleksiId, nomorKatalog = nomorKatalog, sekarang = System.currentTimeMillis())
+                        .keEntity(
+                            koleksiId = koleksi.chatId,
+                            topicId = koleksi.topicId,
+                            nomorKatalog = nomorKatalog,
+                            sekarang = System.currentTimeMillis(),
+                        )
                         .copy(tdLocalPath = null)
                     repo.simpanHasilUnggah(entri)
 
@@ -176,6 +184,9 @@ class UploadWorker(
     companion object {
         const val K_URI = "uri"
         const val K_KOLEKSI = "koleksiId"
+
+        /** Id topik forum tujuan; 0 = channel lama / tanpa topik. */
+        const val K_TOPIK = "topicId"
 
         /** 1,9 miliar byte — di bawah batas ~2 GiB unggah Telegram. */
         private const val BATAS_POTONGAN = 1_900_000_000L

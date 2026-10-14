@@ -1,6 +1,7 @@
 package com.arsipsenja.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -9,15 +10,22 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -30,11 +38,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.arsipsenja.BuildConfig
+import com.arsipsenja.data.repo.ArsipRepository
 import com.arsipsenja.data.telegram.StatusOtorisasi
 import com.arsipsenja.ui.components.BilahPesan
 import com.arsipsenja.ui.components.ChipArsip
@@ -73,6 +84,15 @@ fun PengaturanScreen() {
     var kredensialTerbuka by remember { mutableStateOf(false) }
     var apiIdBaru by remember { mutableStateOf("") }
     var apiHashBaru by remember { mutableStateOf("") }
+    var dialogGrup by remember { mutableStateOf(false) }
+    var dialogVaultBaru by remember { mutableStateOf(false) }
+
+    val vaultAktif by vm.vaultAktif.collectAsState()
+    val kandidatVault by vm.kandidatVault.collectAsState()
+    val memuatVault by vm.memuatVault.collectAsState()
+    val pesanVault by vm.pesanVault.collectAsState()
+    val namaVaultAktif = kandidatVault.firstOrNull { it.chatId == vaultAktif }?.nama
+        ?: if (vaultAktif != null) "Grup ${vaultAktif}" else "Belum dipilih"
 
     Column(
         modifier = Modifier
@@ -194,6 +214,49 @@ fun PengaturanScreen() {
 
         Spacer(Modifier.height(24.dp))
 
+        // ---- Vault Telegram ----
+        JudulBagian("Vault Telegram")
+        Spacer(Modifier.height(10.dp))
+
+        BarisLabel("Vault aktif", namaVaultAktif)
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = "Koleksi baru dibuat sebagai topik di grup vault ini. " +
+                "Pilih grup forum lamamu atau buat vault baru.",
+            style = MaterialTheme.typography.bodySmall,
+            color = WarnaArsip.Tinta3,
+        )
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TombolCadangan(
+                teks = "Pilih grup lama",
+                ikon = ArsipIcons.Folder,
+                onClick = {
+                    vm.muatKandidatVault()
+                    dialogGrup = true
+                },
+                modifier = Modifier.weight(1f),
+                penuh = false,
+            )
+            TombolCadangan(
+                teks = "Buat vault baru",
+                ikon = ArsipIcons.Plus,
+                onClick = { dialogVaultBaru = true },
+                modifier = Modifier.weight(1f),
+                penuh = false,
+            )
+        }
+        if (pesanVault != null) {
+            Spacer(Modifier.height(8.dp))
+            BilahPesan(
+                pesan = pesanVault,
+                nada = NadaPesan.NETRAL,
+                onTutup = vm::habiskanPesanVault,
+            )
+        }
+
+        Spacer(Modifier.height(24.dp))
+
         // ---- Akun Telegram ----
         JudulBagian("Akun Telegram")
         Spacer(Modifier.height(10.dp))
@@ -269,6 +332,56 @@ fun PengaturanScreen() {
         Spacer(Modifier.height(24.dp))
     }
 
+    if (dialogGrup) {
+        DialogPilihGrup(
+            kandidat = kandidatVault,
+            memuat = memuatVault,
+            vaultAktif = vaultAktif,
+            onPilih = { chatId ->
+                dialogGrup = false
+                vm.pilihVault(chatId)
+            },
+            onTutup = { dialogGrup = false },
+        )
+    }
+
+    if (dialogVaultBaru) {
+        var namaBaru by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { dialogVaultBaru = false },
+            containerColor = WarnaArsip.Veil,
+            titleContentColor = WarnaArsip.Tinta,
+            textContentColor = WarnaArsip.Tinta2,
+            title = { Text("Buat vault baru") },
+            text = {
+                KolomIsian(
+                    label = "Nama grup vault",
+                    nilai = namaBaru,
+                    onUbah = { namaBaru = it },
+                    tempat = "Arsip Senja",
+                    imeAction = ImeAction.Done,
+                    onKirim = {
+                        dialogVaultBaru = false
+                        vm.buatVaultBaru(namaBaru)
+                    },
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    dialogVaultBaru = false
+                    vm.buatVaultBaru(namaBaru)
+                }) {
+                    Text("Buat", color = WarnaArsip.Amber)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { dialogVaultBaru = false }) {
+                    Text("Batal", color = WarnaArsip.Tinta2)
+                }
+            },
+        )
+    }
+
     if (konfirmasiKeluar) {
         AlertDialog(
             onDismissRequest = { konfirmasiKeluar = false },
@@ -325,5 +438,139 @@ private fun BarisLabel(label: String, nilai: String) {
             style = MaterialTheme.typography.bodySmall,
             color = WarnaArsip.Tinta,
         )
+    }
+}
+
+/**
+ * Dialog pilihan grup vault: daftar supergroup milik pengguna, radio
+ * single-select, lencana mode forum, daftar bisa scroll.
+ */
+@Composable
+private fun DialogPilihGrup(
+    kandidat: List<ArsipRepository.KandidatVault>,
+    memuat: Boolean,
+    vaultAktif: Long?,
+    onPilih: (Long) -> Unit,
+    onTutup: () -> Unit,
+) {
+    var petunjuk by remember { mutableStateOf<String?>(null) }
+
+    Dialog(onDismissRequest = onTutup) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = WarnaArsip.Veil,
+            contentColor = WarnaArsip.Tinta,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+            ) {
+                Text(
+                    text = "Pilih grup vault",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = WarnaArsip.Tinta,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "Hanya grup berlabel Forum yang bisa dipakai langsung. " +
+                        "Aktifkan Topik di pengaturan grup Telegram dulu bila belum.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = WarnaArsip.Tinta2,
+                )
+                Spacer(Modifier.height(12.dp))
+
+                if (memuat) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
+                        CircularProgressIndicator(
+                            color = WarnaArsip.Amber,
+                            modifier = Modifier.size(28.dp),
+                        )
+                    }
+                } else if (kandidat.isEmpty()) {
+                    Text(
+                        text = "Tidak ada supergroup ditemukan di akun ini.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = WarnaArsip.Tinta3,
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.heightIn(max = 320.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        items(kandidat, key = { it.chatId }) { k ->
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable {
+                                        if (k.forumSiap) {
+                                            onPilih(k.chatId)
+                                        } else {
+                                            petunjuk = "\"${k.nama}\" belum mode forum — " +
+                                                "aktifkan Topik di pengaturan grup dulu."
+                                        }
+                                    }
+                                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                            ) {
+                                RadioButton(
+                                    selected = k.chatId == vaultAktif,
+                                    onClick = {
+                                        if (k.forumSiap) {
+                                            onPilih(k.chatId)
+                                        } else {
+                                            petunjuk = "\"${k.nama}\" belum mode forum — " +
+                                                "aktifkan Topik di pengaturan grup dulu."
+                                        }
+                                    },
+                                    colors = RadioButtonDefaults.colors(
+                                        selectedColor = WarnaArsip.Amber,
+                                        unselectedColor = WarnaArsip.Tinta3,
+                                    ),
+                                )
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        text = k.nama,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = WarnaArsip.Tinta,
+                                        maxLines = 1,
+                                    )
+                                    Text(
+                                        text = if (k.forumSiap) "Forum siap"
+                                        else "Belum mode forum",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (k.forumSiap) WarnaArsip.Sukses
+                                        else WarnaArsip.Tinta3,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                petunjuk?.let { p ->
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = p,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = WarnaArsip.AmberTerang,
+                    )
+                }
+
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(onClick = onTutup) {
+                        Text("Tutup", color = WarnaArsip.Tinta2)
+                    }
+                }
+            }
+        }
     }
 }

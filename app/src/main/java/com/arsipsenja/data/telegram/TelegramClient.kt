@@ -408,6 +408,163 @@ class TelegramClient(
         kirim(TdApi.LeaveChat().apply { this.chatId = chatId })
     }
 
+    // ---------------------------------------------------------------------
+    // Vault & topik forum
+    // ---------------------------------------------------------------------
+
+    /** Info ringkas satu topik forum di dalam grup vault. */
+    data class InfoTopik(
+        val chatId: Long,
+        val topicId: Int,
+        val nama: String,
+        val umum: Boolean,
+        val tertutup: Boolean,
+    )
+
+    /** Supergroup (bukan channel) milik daftar chat utama — kandidat vault. */
+    suspend fun daftarSupergroup(): List<TdApi.Chat> {
+        val daftar = kirim(
+            TdApi.GetChats().apply {
+                chatList = TdApi.ChatListMain()
+                limit = 100
+            },
+        )
+        return daftar.chatIds.toList()
+            .mapNotNull { id ->
+                try {
+                    kirim(TdApi.GetChat().apply { chatId = id })
+                } catch (e: Exception) {
+                    Log.w(tag, "Gagal memuat chat $id", e)
+                    null
+                }
+            }
+            .filter {
+                val tipe = it.type
+                tipe is TdApi.ChatTypeSupergroup && !tipe.isChannel
+            }
+    }
+
+    /** Buat grup vault forum baru bernama [nama]. */
+    suspend fun buatVault(nama: String): TdApi.Chat =
+        kirim(
+            TdApi.CreateNewSupergroupChat().apply {
+                title = nama.trim()
+                isForum = true
+                isChannel = false
+                description = ""
+                location = null
+                messageAutoDeleteTime = 0
+                forImport = false
+            },
+        )
+
+    /** Seluruh topik forum di satu chat; paginasi ditangani otomatis. */
+    suspend fun daftarTopik(chatId: Long): List<InfoTopik> {
+        val hasil = mutableListOf<InfoTopik>()
+        var offsetDate = 0
+        var offsetMessageId = 0L
+        var offsetForumTopicId = 0
+        do {
+            val halaman = kirim(
+                TdApi.GetForumTopics().apply {
+                    this.chatId = chatId
+                    query = ""
+                    this.offsetDate = offsetDate
+                    this.offsetMessageId = offsetMessageId
+                    this.offsetForumTopicId = offsetForumTopicId
+                    limit = 100
+                },
+            )
+            halaman.topics?.forEach { topik ->
+                val info = topik.info ?: return@forEach
+                hasil += InfoTopik(
+                    chatId = chatId,
+                    topicId = info.forumTopicId,
+                    nama = info.name,
+                    umum = info.isGeneral,
+                    tertutup = info.isClosed,
+                )
+            }
+            offsetDate = halaman.nextOffsetDate
+            offsetMessageId = halaman.nextOffsetMessageId
+            offsetForumTopicId = halaman.nextOffsetForumTopicId
+        } while (offsetForumTopicId != 0)
+        return hasil
+    }
+
+    /**
+     * Cari topik berdasar nama (case-insensitive); buat otomatis bila belum ada.
+     * Inilah jalur yang dipakai unggah: kategori yang hilang dibuat sendiri.
+     */
+    suspend fun pastikanTopik(chatId: Long, nama: String): InfoTopik {
+        val bersih = nama.trim()
+        require(bersih.isNotEmpty()) { "Nama topik kosong." }
+        daftarTopik(chatId)
+            .firstOrNull { it.nama.equals(bersih, ignoreCase = true) }
+            ?.let { return it }
+        return buatTopik(chatId, bersih)
+    }
+
+    /** Buat topik forum baru dan kembalikan infonya. */
+    suspend fun buatTopik(chatId: Long, nama: String): InfoTopik {
+        val bersih = nama.trim()
+        require(bersih.isNotEmpty()) { "Nama topik kosong." }
+        val info = kirim(
+            TdApi.CreateForumTopic().apply {
+                this.chatId = chatId
+                this.name = bersih
+                isNameImplicit = false
+                icon = TdApi.ForumTopicIcon().apply {
+                    color = WARNA_TOPIK
+                    customEmojiId = 0L
+                }
+            },
+        )
+        return InfoTopik(chatId, info.forumTopicId, info.name, info.isGeneral, info.isClosed)
+    }
+
+    /** Ganti nama topik forum. */
+    suspend fun ubahTopik(chatId: Long, topicId: Int, nama: String) {
+        kirim(
+            TdApi.EditForumTopic().apply {
+                this.chatId = chatId
+                this.forumTopicId = topicId
+                this.name = nama.trim()
+                editIconCustomEmoji = false
+                iconCustomEmojiId = 0L
+            },
+        )
+    }
+
+    /** Hapus topik forum beserta seluruh pesannya. */
+    suspend fun hapusTopik(chatId: Long, topicId: Int) {
+        kirim(
+            TdApi.DeleteForumTopic().apply {
+                this.chatId = chatId
+                this.forumTopicId = topicId
+            },
+        )
+    }
+
+    /** Riwayat pesan di dalam satu topik forum. */
+    suspend fun riwayatTopik(
+        chatId: Long,
+        topicId: Int,
+        dariMessageId: Long,
+        batas: Int,
+    ): List<TdApi.Message> {
+        val hasil = kirim(
+            TdApi.GetForumTopicHistory().apply {
+                this.chatId = chatId
+                this.forumTopicId = topicId
+                fromMessageId = dariMessageId
+                offset = 0
+                limit = batas
+            },
+        )
+        return hasil.messages?.toList().orEmpty()
+    }
+
     suspend fun riwayat(chatId: Long, dariMessageId: Long, batas: Int): List<TdApi.Message> {
         val hasil = kirim(
             TdApi.GetChatHistory().apply {
@@ -428,12 +585,14 @@ class TelegramClient(
     /**
      * Kirim satu berkas lokal ke koleksi. [tipe] menentukan jenis konten
      * pesan (foto/video/audio/dokumen) agar pratinjau Telegram tetap rapi.
+     * [topicId] != 0 berarti kirim ke dalam topik forum (message thread).
      */
     suspend fun kirimBerkas(
         chatId: Long,
         path: String,
         tipe: TipeFile,
         caption: String,
+        topicId: Int = 0,
     ): TdApi.Message {
         // Nama lokal agar tidak tertutup (shadow) oleh field `caption`
         // milik TdApi di dalam blok apply di bawah.
@@ -468,7 +627,8 @@ class TelegramClient(
         return kirim(
             TdApi.SendMessage().apply {
                 this.chatId = chatId
-                topicId = null
+                this.topicId =
+                    if (topicId != 0) TdApi.MessageTopicForum(topicId) else null
                 replyTo = null
                 options = null
                 replyMarkup = null
@@ -537,7 +697,7 @@ class TelegramClient(
     // Tautan
     // ---------------------------------------------------------------------
 
-    suspend fun tautanPesan(chatId: Long, messageId: Long): String {
+    suspend fun tautanPesan(chatId: Long, messageId: Long, dalamThread: Boolean = false): String {
         val hasil = kirim(
             TdApi.GetMessageLink().apply {
                 this.chatId = chatId
@@ -545,7 +705,7 @@ class TelegramClient(
                 mediaTimestamp = 0
                 pollOptionId = null
                 forAlbum = false
-                inMessageThread = false
+                inMessageThread = dalamThread
             },
         )
         return hasil.link
@@ -572,6 +732,9 @@ class TelegramClient(
 
     companion object {
         private const val BATAS_UNGGAH = 30L * 60L * 1000L
+
+        /** Warna ikon topik forum (RGB, aksen amber khas Arsip Senja). */
+        private const val WARNA_TOPIK = 0xE8A33D
 
         @Volatile
         private var pustakaDimuat = false

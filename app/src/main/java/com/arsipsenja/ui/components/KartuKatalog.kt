@@ -1,6 +1,7 @@
 package com.arsipsenja.ui.components
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -23,13 +25,20 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
 import com.arsipsenja.data.local.BerkasArsipEntity
 import com.arsipsenja.ui.icons.ArsipIcons
 import com.arsipsenja.ui.theme.SudutKartu
@@ -50,6 +59,7 @@ fun KartuKatalog(
     modifier: Modifier = Modifier,
     namaKoleksi: String? = null,
     statusLokal: StatusLokal = StatusLokal.BELUM,
+    onMintaThumbnail: (BerkasArsipEntity) -> Unit = {},
     onClick: () -> Unit,
 ) {
     val interaksi = remember { MutableInteractionSource() }
@@ -80,7 +90,11 @@ fun KartuKatalog(
                     warna = if (ditekan) WarnaArsip.AmberTerang else WarnaArsip.Amber,
                 )
                 Spacer(Modifier.weight(1f))
-                IkonBerkas(tipe = tipe, ukuran = 30.dp, ikon = 15.dp)
+                GambarMini(
+                    berkas = berkas,
+                    ukuran = 54.dp,
+                    onMintaThumbnail = onMintaThumbnail,
+                )
             }
 
             Spacer(Modifier.height(10.dp))
@@ -125,6 +139,7 @@ fun BarisKatalog(
     modifier: Modifier = Modifier,
     namaKoleksi: String? = null,
     statusLokal: StatusLokal = StatusLokal.BELUM,
+    onMintaThumbnail: (BerkasArsipEntity) -> Unit = {},
     onClick: () -> Unit,
 ) {
     val interaksi = remember { MutableInteractionSource() }
@@ -149,7 +164,11 @@ fun BarisKatalog(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IkonBerkas(tipe = tipe, ukuran = 40.dp, ikon = 19.dp)
+            GambarMini(
+                berkas = berkas,
+                ukuran = 44.dp,
+                onMintaThumbnail = onMintaThumbnail,
+            )
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -252,3 +271,69 @@ private fun PenandaStatus(status: StatusLokal) {
 fun tipeDari(berkas: BerkasArsipEntity): TipeFile =
     TipeFile.entries.firstOrNull { it.name == berkas.tipe }
         ?: TipeFile.dariMime(berkas.mime, berkas.nama)
+
+/**
+ * Pratinjau mini berkas: thumbnail Coil bila sudah tersedia lokal,
+ * ikon tipe sebagai gantinya. Meminta unduh thumbnail sekali saat
+ * kartu tampil dan thumbnail belum ada.
+ */
+@Composable
+fun GambarMini(
+    berkas: BerkasArsipEntity,
+    ukuran: Dp,
+    onMintaThumbnail: (BerkasArsipEntity) -> Unit,
+) {
+    val tipe = tipeDari(berkas)
+    val jalur = berkas.thumbPath
+    LaunchedEffect(berkas.id, jalur) {
+        if (jalur.isNullOrBlank() && berkas.tdThumbFileId != 0) {
+            onMintaThumbnail(berkas)
+        }
+    }
+    val berkasThumb = jalur?.let { java.io.File(it) }?.takeIf { it.exists() }
+    if (berkasThumb != null) {
+        Box(
+            modifier = Modifier
+                .size(ukuran)
+                .clip(RoundedCornerShape(10.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            AsyncImage(
+                model = berkasThumb,
+                contentDescription = "Pratinjau ${berkas.nama}",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.matchParentSize(),
+            )
+            if (tipe == TipeFile.VIDEO) {
+                LencanaPutar()
+            }
+        }
+    } else {
+        IkonBerkas(tipe = tipe, ukuran = ukuran, ikon = ukuran * 0.48f)
+    }
+}
+
+/** Lencana putar kecil di atas thumbnail video. */
+@Composable
+private fun LencanaPutar() {
+    Box(
+        modifier = Modifier
+            .size(22.dp)
+            .background(Color.Black.copy(alpha = 0.55f), CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(modifier = Modifier.size(10.dp)) {
+            val w = size.width
+            val h = size.height
+            drawPath(
+                path = Path().apply {
+                    moveTo(w * 0.28f, h * 0.18f)
+                    lineTo(w * 0.82f, h * 0.5f)
+                    lineTo(w * 0.28f, h * 0.82f)
+                    close()
+                },
+                color = Color.White,
+            )
+        }
+    }
+}
