@@ -49,11 +49,10 @@ import androidx.media3.ui.PlayerView
 import androidx.work.WorkInfo
 import coil.compose.AsyncImage
 import com.arsipsenja.data.local.BerkasArsipEntity
-import com.arsipsenja.ui.components.BilahPesan
 import com.arsipsenja.ui.components.KeadaanKosong
 import com.arsipsenja.ui.components.KolomIsian
-import com.arsipsenja.ui.components.NadaPesan
 import com.arsipsenja.ui.components.NomorKatalog
+import com.arsipsenja.ui.components.PopupStatus
 import com.arsipsenja.ui.components.ProgresTransfer
 import com.arsipsenja.ui.components.TombolCadangan
 import com.arsipsenja.ui.components.TombolIkon
@@ -130,12 +129,11 @@ fun BerkasScreen(berkasId: String, onKembali: () -> Unit) {
             }
         }
 
-        BilahPesan(
+        // Status aksi (unduh, tautan, hapus) lewat popup modal.
+        PopupStatus(
             pesan = pesan,
-            nada = NadaPesan.NETRAL,
             onTutup = vm::habiskanPesan,
         )
-        if (pesan != null) Spacer(Modifier.height(8.dp))
 
         val b = berkas
         if (b == null) {

@@ -61,16 +61,15 @@ import com.arsipsenja.data.local.BerkasArsipEntity
 import com.arsipsenja.data.local.KoleksiEntity
 import com.arsipsenja.ui.components.BagianKunciBaru
 import com.arsipsenja.ui.components.BarisKatalog
-import com.arsipsenja.ui.components.BilahPesan
 import com.arsipsenja.ui.components.ChipArsip
 import com.arsipsenja.ui.components.KartuKatalog
 import com.arsipsenja.ui.components.KeadaanKosong
 import com.arsipsenja.ui.components.KolomCari
 import com.arsipsenja.ui.components.LencanaTerkunci
-import com.arsipsenja.ui.components.NadaPesan
+import com.arsipsenja.ui.components.PopupNamaKoleksi
+import com.arsipsenja.ui.components.PopupStatus
 import com.arsipsenja.ui.components.SheetBukaKunci
 import com.arsipsenja.ui.components.StatistikArsip
-import com.arsipsenja.ui.components.TombolCadangan
 import com.arsipsenja.ui.components.TombolIkon
 import com.arsipsenja.ui.components.TombolUtama
 import com.arsipsenja.ui.components.perangkatDukungBiometrik
@@ -98,6 +97,10 @@ fun DasborScreen(onBukaBerkas: (String) -> Unit, onBukaImpor: () -> Unit = {}) {
     val saringan by vm.saringan.collectAsState()
     val memuat by vm.memuat.collectAsState()
     val pesan by vm.pesan.collectAsState()
+    val progres by vm.progres.collectAsState()
+    val antreanBuat by vm.antreanBuat.collectAsState()
+    val antreanTarik by vm.antreanTarik.collectAsState()
+    val semuaNamaKoleksi by vm.semuaNamaKoleksi.collectAsState()
     val dibuka by vm.koleksiTerbuka.collectAsState()
 
     var kelolaKoleksi by remember { mutableStateOf(false) }
@@ -134,13 +137,6 @@ fun DasborScreen(onBukaBerkas: (String) -> Unit, onBukaImpor: () -> Unit = {}) {
             .fillMaxSize()
             .padding(horizontal = 16.dp),
     ) {
-        BilahPesan(
-            pesan = pesan,
-            nada = if (pesan?.contains("gagal", true) == true) NadaPesan.SALAH else NadaPesan.BAIK,
-            onTutup = vm::habiskanPesan,
-        )
-        if (pesan != null) Spacer(Modifier.height(8.dp))
-
         KepalaDasbor(
             jumlahBerkas = statistik.jumlah,
             tampilan = tampilan,
@@ -149,6 +145,17 @@ fun DasborScreen(onBukaBerkas: (String) -> Unit, onBukaImpor: () -> Unit = {}) {
             onKelola = { kelolaKoleksi = true },
             onGantiTampilan = vm::gantiTampilan,
         )
+
+        // Progres sinkron terpilih: caption teks inline, bukan popup —
+        // popup per koleksi akan menumpuk dan memaksa ketuk berkali-kali.
+        progres?.let {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = it,
+                style = MaterialTheme.typography.bodySmall,
+                color = WarnaArsip.Tinta3,
+            )
+        }
 
         Spacer(Modifier.height(12.dp))
 
@@ -283,6 +290,44 @@ fun DasborScreen(onBukaBerkas: (String) -> Unit, onBukaImpor: () -> Unit = {}) {
             },
             onBiometrikLolos = { vm.bukaKunciBiometrik(target.kunci) },
         )
+    }
+
+    // Status (sukses/gagal/info) hanya lewat popup modal — satu dalam
+    // satu waktu, pesan baru mengganti isi popup yang sedang tampil.
+    PopupStatus(
+        pesan = pesan,
+        onTutup = vm::habiskanPesan,
+        onAksiUlang = if (pesan?.aksiUlang == true) {
+            vm::buatVaultBaruDanCobaLagi
+        } else {
+            null
+        },
+    )
+
+    // Penamaan koleksi: satu popup dalam satu waktu, antrean Buat
+    // didahulukan atas Tarik. Tampil hanya bila tidak ada popup status —
+    // popup galat (mis. gagal buat) tidak boleh ditumpuk popup penamaan.
+    if (pesan == null) {
+        val itemBuat = antreanBuat.firstOrNull()
+        val itemTarik = antreanTarik.firstOrNull()
+        when {
+            itemBuat != null -> PopupNamaKoleksi(
+                item = itemBuat,
+                namaTerpakai = semuaNamaKoleksi,
+                adaLagi = antreanBuat.size > 1,
+                onSimpan = vm::simpanNamaBuat,
+                onLewati = vm::lewatiNamaBuat,
+                onBatalkanSemua = vm::batalkanAntreanBuat,
+            )
+            itemTarik != null -> PopupNamaKoleksi(
+                item = itemTarik,
+                namaTerpakai = semuaNamaKoleksi,
+                adaLagi = antreanTarik.size > 1,
+                onSimpan = vm::simpanNamaTarik,
+                onLewati = vm::lewatiNamaTarik,
+                onBatalkanSemua = vm::batalkanAntreanTarik,
+            )
+        }
     }
 }
 
@@ -698,7 +743,6 @@ private fun LembarKoleksi(
     onTutup: () -> Unit,
     onBukaImpor: () -> Unit,
 ) {
-    var namaBaru by remember { mutableStateOf("") }
     var deskripsiBaru by remember { mutableStateOf("") }
     var labelBaru by remember { mutableStateOf("") }
     var warnaBaru by remember { mutableStateOf(0) }
@@ -718,11 +762,8 @@ private fun LembarKoleksi(
 
     val konteks = LocalContext.current
     val dukungBio = remember { perangkatDukungBiometrik(konteks) }
-    val pesanKelola by vm.pesan.collectAsState()
-    val tawarkanVault by vm.tawarkanVaultBaru.collectAsState()
 
     fun aturUlangForm() {
-        namaBaru = ""
         deskripsiBaru = ""
         labelBaru = ""
         warnaBaru = 0
@@ -737,17 +778,22 @@ private fun LembarKoleksi(
         galatKunci = null
     }
 
-    /** Validasi kunci dulu, lalu kirim; reset HANYA bila sukses (via callback). */
-    fun buatLaluResetBilaSukses() {
-        if (namaBaru.isBlank()) return
+    /**
+     * Validasi kunci dulu, lalu mulai antrean penamaan: satu popup nama
+     * per tipe yang dicentang. Form dikosongkan dan sheet ditutup
+     * langsung — pengaturan bersama sudah disalin ke antrean, dan
+     * pembuatan tiap koleksi terjadi saat namanya disimpan di popup.
+     */
+    fun buatAntrean() {
+        if (tipeBaru.isEmpty()) return
         galatKunci = KunciRahasia.validasiFormulir(
             kunciAktif, kunciTipe, kunciRahasia, kunciKonfirmasi, kunciPola, kunciPolaUlang,
         )
         if (galatKunci != null) return
         val kunci = KunciRahasia.rangkai(kunciAktif, kunciTipe, kunciRahasia, kunciPola, kunciBio)
-        vm.buatKoleksi(namaBaru, deskripsiBaru, labelBaru, warnaBaru, tipeBaru, kunci) {
-            aturUlangForm()
-        }
+        vm.mulaiBuatAntrean(deskripsiBaru, labelBaru, warnaBaru, tipeBaru, kunci)
+        aturUlangForm()
+        onTutup()
     }
 
     ModalBottomSheet(
@@ -800,11 +846,11 @@ private fun LembarKoleksi(
 
             Spacer(Modifier.height(16.dp))
 
-            com.arsipsenja.ui.components.KolomIsian(
-                label = "Nama koleksi baru",
-                nilai = namaBaru,
-                onUbah = { namaBaru = it },
-                tempat = "Kenangan 2026",
+            Text(
+                text = "Nama tiap koleksi ditanya satu per satu lewat popup " +
+                    "setelah kamu menekan \"Buat koleksi\".",
+                style = MaterialTheme.typography.bodySmall,
+                color = WarnaArsip.Tinta2,
             )
             Spacer(Modifier.height(10.dp))
             com.arsipsenja.ui.components.KolomIsian(
@@ -820,7 +866,7 @@ private fun LembarKoleksi(
                 onUbah = { labelBaru = it.take(24) },
                 tempat = "PENTING",
                 imeAction = androidx.compose.ui.text.input.ImeAction.Done,
-                onKirim = { buatLaluResetBilaSukses() },
+                onKirim = { buatAntrean() },
             )
 
             Spacer(Modifier.height(12.dp))
@@ -862,30 +908,23 @@ private fun LembarKoleksi(
             )
 
             Spacer(Modifier.height(16.dp))
+            Text(
+                text = if (tipeBaru.isEmpty()) {
+                    "Centang minimal satu tipe berkas untuk membuat koleksi."
+                } else {
+                    "${tipeBaru.size} koleksi akan dibuat, satu per tipe — " +
+                        "namanya ditanya satu per satu."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = WarnaArsip.Tinta2,
+            )
+            Spacer(Modifier.height(8.dp))
             TombolUtama(
                 teks = "Buat koleksi",
                 ikon = ArsipIcons.Plus,
-                aktif = namaBaru.isNotBlank(),
-                onClick = { buatLaluResetBilaSukses() },
+                aktif = tipeBaru.isNotEmpty(),
+                onClick = { buatAntrean() },
             )
-
-            val galatBuat = pesanKelola?.takeIf { it.contains("gagal", ignoreCase = true) }
-            if (galatBuat != null) {
-                Spacer(Modifier.height(10.dp))
-                BilahPesan(
-                    pesan = galatBuat,
-                    nada = NadaPesan.SALAH,
-                    onTutup = vm::habiskanPesan,
-                )
-                if (tawarkanVault) {
-                    Spacer(Modifier.height(8.dp))
-                    TombolCadangan(
-                        teks = "Buat vault baru & coba lagi",
-                        ikon = ArsipIcons.Plus,
-                        onClick = vm::buatVaultBaruDanCobaLagi,
-                    )
-                }
-            }
 
             Spacer(Modifier.height(20.dp))
 

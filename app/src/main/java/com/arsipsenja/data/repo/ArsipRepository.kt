@@ -917,6 +917,20 @@ class ArsipRepository(
     suspend fun koleksiTerpilihAtauPertama(): KunciKoleksi? =
         koleksiDao.ambilSemuaPribadi().firstOrNull()?.kunci
 
+    /**
+     * Semua kunci koleksi yang sudah dikenal (pribadi + impor) — snapshot
+     * untuk deteksi "baru tercakup" saat Tarik. Bukan nama: topik bernama
+     * sama dengan koleksi lama tetap baru bila kuncinya berbeda.
+     */
+    suspend fun kunciDikenal(): Set<KunciKoleksi> =
+        (koleksiDao.ambilSemuaPribadi() + koleksiDao.ambilSemuaImpor())
+            .map { it.kunci }
+            .toSet()
+
+    /** Satu entri koleksi berdasarkan kuncinya, null bila belum dikenal. */
+    suspend fun koleksi(kunci: KunciKoleksi): KoleksiEntity? =
+        koleksiDao.ambil(kunci.chatId, kunci.topicId)
+
     // ---- Unggah ----
 
     /**

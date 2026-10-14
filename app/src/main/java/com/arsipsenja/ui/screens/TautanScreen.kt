@@ -35,10 +35,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.arsipsenja.data.local.JenisTautan
 import com.arsipsenja.data.local.TautanEntity
-import com.arsipsenja.ui.components.BilahPesan
 import com.arsipsenja.ui.components.ChipArsip
 import com.arsipsenja.ui.components.KeadaanKosong
-import com.arsipsenja.ui.components.NadaPesan
+import com.arsipsenja.ui.components.PopupStatus
 import com.arsipsenja.ui.components.TombolIkon
 import com.arsipsenja.ui.components.TombolUtama
 import com.arsipsenja.ui.icons.ArsipIcons
@@ -77,13 +76,11 @@ fun TautanScreen() {
             .fillMaxSize()
             .padding(horizontal = 16.dp),
     ) {
-        BilahPesan(
+        // Status aksi (buat/cabut/hapus tautan) lewat popup modal.
+        PopupStatus(
             pesan = pesan,
-            nada = if (pesan?.contains("Gagal", true) == true) NadaPesan.SALAH
-            else NadaPesan.BAIK,
             onTutup = vm::habiskanPesan,
         )
-        if (pesan != null) Spacer(Modifier.height(8.dp))
 
         Text(
             text = "Tautan berbagi",

@@ -67,8 +67,8 @@ class BerkasViewModel(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    private val _pesan = MutableStateFlow<String?>(null)
-    val pesan: StateFlow<String?> = _pesan.asStateFlow()
+    private val _pesan = MutableStateFlow<PesanStatus?>(null)
+    val pesan: StateFlow<PesanStatus?> = _pesan.asStateFlow()
 
     private val _sibuk = MutableStateFlow(false)
     val sibuk: StateFlow<Boolean> = _sibuk.asStateFlow()
@@ -98,9 +98,9 @@ class BerkasViewModel(
             _sibuk.value = true
             try {
                 repo.mulaiUnduh(berkasId)
-                _pesan.value = "Unduhan masuk antrean."
+                _pesan.value = PesanStatus(NadaStatus.SUKSES, "Unduhan masuk antrean.")
             } catch (e: Exception) {
-                _pesan.value = "Gagal memulai unduhan: ${e.message}"
+                _pesan.value = PesanStatus(NadaStatus.GALAT, "Gagal memulai unduhan: ${e.message}")
             } finally {
                 _sibuk.value = false
             }
@@ -113,9 +113,9 @@ class BerkasViewModel(
             try {
                 _tautanBaru.value = repo.buatTautanPesan(berkasId)
             } catch (e: TelegramException) {
-                _pesan.value = "Gagal membuat tautan: ${e.pesan}"
+                _pesan.value = PesanStatus(NadaStatus.GALAT, "Gagal membuat tautan: ${e.pesan}")
             } catch (e: Exception) {
-                _pesan.value = "Gagal membuat tautan: ${e.message}"
+                _pesan.value = PesanStatus(NadaStatus.GALAT, "Gagal membuat tautan: ${e.message}")
             } finally {
                 _sibuk.value = false
             }
@@ -126,9 +126,9 @@ class BerkasViewModel(
         viewModelScope.launch {
             try {
                 repo.hapusCatatanTautan(id)
-                _pesan.value = "Catatan tautan dihapus."
+                _pesan.value = PesanStatus(NadaStatus.SUKSES, "Catatan tautan dihapus.")
             } catch (e: Exception) {
-                _pesan.value = "Gagal menghapus tautan: ${e.message}"
+                _pesan.value = PesanStatus(NadaStatus.GALAT, "Gagal menghapus tautan: ${e.message}")
             }
         }
     }
@@ -143,9 +143,9 @@ class BerkasViewModel(
                     }
                 }
                 repo.hapusBerkas(berkasId)
-                _pesan.value = "Berkas dihapus dari indeks arsip."
+                _pesan.value = PesanStatus(NadaStatus.SUKSES, "Berkas dihapus dari indeks arsip.")
             } catch (e: Exception) {
-                _pesan.value = "Gagal menghapus berkas: ${e.message}"
+                _pesan.value = PesanStatus(NadaStatus.GALAT, "Gagal menghapus berkas: ${e.message}")
             } finally {
                 _sibuk.value = false
             }

@@ -38,9 +38,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.arsipsenja.R
 import com.arsipsenja.data.telegram.StatusOtorisasi
-import com.arsipsenja.ui.components.BilahPesan
 import com.arsipsenja.ui.components.KolomIsian
-import com.arsipsenja.ui.components.NadaPesan
+import com.arsipsenja.ui.components.PopupStatus
 import com.arsipsenja.ui.components.TombolCadangan
 import com.arsipsenja.ui.components.TombolUtama
 import com.arsipsenja.ui.icons.ArsipIcons
@@ -61,7 +60,6 @@ fun LoginScreen() {
     val sibuk by vm.sibuk.collectAsState()
 
     val wadah = checkNotNull(LocalKontainer.current)
-    var tampilGalat by remember(galat) { mutableStateOf(galat) }
 
     Column(
         modifier = Modifier
@@ -73,16 +71,6 @@ fun LoginScreen() {
         KepalaMerek()
 
         Spacer(Modifier.height(32.dp))
-
-        tampilGalat?.let {
-            BilahPesan(
-                pesan = it,
-                nada = NadaPesan.SALAH,
-                onTutup = { vm.tanganiGalat(); tampilGalat = null },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(16.dp))
-        }
 
         when (val s = status) {
             is StatusOtorisasi.MenungguKredensial -> FormulirKredensial(vm, sibuk)
@@ -107,6 +95,13 @@ fun LoginScreen() {
             modifier = Modifier.fillMaxWidth(),
         )
     }
+
+    // Galat login lewat popup modal. StatusGalat (status otorisasi dari
+    // TDLib) sengaja tetap inline — itu tampilan status, bukan pesan aksi.
+    PopupStatus(
+        pesan = galat,
+        onTutup = vm::tanganiGalat,
+    )
 }
 
 // ---------------------------------------------------------------------

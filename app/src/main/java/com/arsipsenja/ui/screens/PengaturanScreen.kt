@@ -48,10 +48,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.arsipsenja.BuildConfig
 import com.arsipsenja.data.repo.ArsipRepository
 import com.arsipsenja.data.telegram.StatusOtorisasi
-import com.arsipsenja.ui.components.BilahPesan
 import com.arsipsenja.ui.components.ChipArsip
 import com.arsipsenja.ui.components.KolomIsian
-import com.arsipsenja.ui.components.NadaPesan
+import com.arsipsenja.ui.components.PopupStatus
 import com.arsipsenja.ui.components.StatistikArsip
 import com.arsipsenja.ui.components.TombolCadangan
 import com.arsipsenja.ui.components.TombolUtama
@@ -112,13 +111,6 @@ fun PengaturanScreen() {
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp),
     ) {
-        BilahPesan(
-            pesan = galat,
-            nada = NadaPesan.SALAH,
-            onTutup = vm::tanganiGalat,
-        )
-        if (galat != null) Spacer(Modifier.height(8.dp))
-
         Text(
             text = "Pengaturan",
             style = MaterialTheme.typography.headlineMedium.copy(fontFamily = Fraunces),
@@ -308,15 +300,6 @@ fun PengaturanScreen() {
                 penuh = false,
             )
         }
-        if (pesanVault != null) {
-            Spacer(Modifier.height(8.dp))
-            BilahPesan(
-                pesan = pesanVault,
-                nada = NadaPesan.NETRAL,
-                onTutup = vm::habiskanPesanVault,
-            )
-        }
-
         Spacer(Modifier.height(24.dp))
 
         // ---- Akun Telegram ----
@@ -473,6 +456,17 @@ fun PengaturanScreen() {
             },
         )
     }
+
+    // Satu popup status dalam satu waktu: galat kredensial/sinkron
+    // didahulukan atas pesan vault. galatKandidat sengaja TETAP teks
+    // inline di DialogPilihGrup — kontekstual untuk dialog itu, seperti
+    // teks per baris antrean Unggah.
+    PopupStatus(
+        pesan = galat ?: pesanVault,
+        onTutup = {
+            if (galat != null) vm.tanganiGalat() else vm.habiskanPesanVault()
+        },
+    )
 }
 
 @Composable

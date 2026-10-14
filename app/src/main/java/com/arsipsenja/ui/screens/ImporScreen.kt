@@ -37,11 +37,11 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.arsipsenja.data.local.BerkasArsipEntity
 import com.arsipsenja.data.local.KoleksiEntity
 import com.arsipsenja.data.local.KunciRahasia
-import com.arsipsenja.ui.components.BilahPesan
 import com.arsipsenja.ui.components.KartuKatalog
 import com.arsipsenja.ui.components.KeadaanKosong
 import com.arsipsenja.ui.components.LencanaTerkunci
-import com.arsipsenja.ui.components.NadaPesan
+import com.arsipsenja.ui.components.PopupNamaKoleksi
+import com.arsipsenja.ui.components.PopupStatus
 import com.arsipsenja.ui.components.SheetBukaKunci
 import com.arsipsenja.ui.components.TombolCadangan
 import com.arsipsenja.ui.components.TombolIkon
@@ -69,6 +69,8 @@ fun ImporScreen(onBukaBerkas: (String) -> Unit) {
     val berkas by vm.berkas.collectAsState()
     val memuat by vm.memuat.collectAsState()
     val pesan by vm.pesan.collectAsState()
+    val antreanTarik by vm.antreanTarik.collectAsState()
+    val semuaNamaKoleksi by vm.semuaNamaKoleksi.collectAsState()
     val dibuka by vm.koleksiTerbuka.collectAsState()
 
     var bukaUntuk by remember { mutableStateOf<KoleksiEntity?>(null) }
@@ -105,13 +107,6 @@ fun ImporScreen(onBukaBerkas: (String) -> Unit) {
             .fillMaxSize()
             .padding(horizontal = 16.dp),
     ) {
-        BilahPesan(
-            pesan = pesan,
-            nada = if (pesan?.contains("gagal", true) == true) NadaPesan.SALAH else NadaPesan.BAIK,
-            onTutup = vm::habiskanPesan,
-        )
-        if (pesan != null) Spacer(Modifier.height(8.dp))
-
         KepalaImpor(
             jumlahKoleksi = impor.size,
             memuat = memuat,
@@ -218,6 +213,26 @@ fun ImporScreen(onBukaBerkas: (String) -> Unit) {
             },
             onBiometrikLolos = { vm.bukaKunciBiometrik(target.kunci) },
         )
+    }
+
+    PopupStatus(
+        pesan = pesan,
+        onTutup = vm::habiskanPesan,
+    )
+
+    // Penamaan hasil Tarik: satu popup dalam satu waktu, hanya bila
+    // tidak ada popup status — popup galat rename tidak boleh ditumpuk.
+    if (pesan == null) {
+        antreanTarik.firstOrNull()?.let { item ->
+            PopupNamaKoleksi(
+                item = item,
+                namaTerpakai = semuaNamaKoleksi,
+                adaLagi = antreanTarik.size > 1,
+                onSimpan = vm::simpanNamaTarik,
+                onLewati = vm::lewatiNamaTarik,
+                onBatalkanSemua = vm::batalkanAntreanTarik,
+            )
+        }
     }
 }
 

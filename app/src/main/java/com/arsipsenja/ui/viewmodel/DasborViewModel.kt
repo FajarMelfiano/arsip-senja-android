@@ -53,8 +53,40 @@ class DasborViewModel(
     private val _memuat = MutableStateFlow(false)
     val memuat: StateFlow<Boolean> = _memuat.asStateFlow()
 
-    private val _pesan = MutableStateFlow<String?>(null)
-    val pesan: StateFlow<String?> = _pesan.asStateFlow()
+    private val _pesan = MutableStateFlow<PesanStatus?>(null)
+    val pesan: StateFlow<PesanStatus?> = _pesan.asStateFlow()
+
+    /**
+     * Progres sinkron terpilih (transien, BUKAN status akhir): ditampilkan
+     * sebagai teks inline di Dasbor, tidak pernah jadi popup modal —
+     * popup per koleksi akan menumpuk dan memaksa ketuk berkali-kali.
+     */
+    private val _progres = MutableStateFlow<String?>(null)
+    val progres: StateFlow<String?> = _progres.asStateFlow()
+
+    /** Antrean popup penamaan: Buat (per tipe) dan Tarik (per entri baru). */
+    private val _antreanBuat = MutableStateFlow<List<ItemPenamaan>>(emptyList())
+    val antreanBuat: StateFlow<List<ItemPenamaan>> = _antreanBuat.asStateFlow()
+
+    private val _antreanTarik = MutableStateFlow<List<ItemPenamaan>>(emptyList())
+    val antreanTarik: StateFlow<List<ItemPenamaan>> = _antreanTarik.asStateFlow()
+
+    /** Semua nama koleksi (pribadi + impor) untuk validasi duplikat popup. */
+    val semuaNamaKoleksi: StateFlow<List<String>> = repo.alirKoleksi()
+        .map { daftar -> daftar.map { it.nama } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Item Buat yang gagal karena vault, menunggu tombol aksi ulang. */
+    private var itemGagalVault: ItemPenamaan? = null
+
+    private var dibuatBuat = 0
+    private var gagalBuat = 0
+    private var totalTarik = 0
+    private var gagalTarik = 0
+
+    /** Ringkasan yang menunggu popup galat ditutup dulu (latest-wins). */
+    private var ringkasanBuatTertunda = false
+    private var ringkasanTarikTertunda = false
 
     private val _koleksiAktif = MutableStateFlow<KunciKoleksi?>(null)
     val koleksiAktif: StateFlow<KunciKoleksi?> = _koleksiAktif.asStateFlow()
@@ -161,18 +193,30 @@ class DasborViewModel(
                 kunci.forEachIndexed { i, k ->
                     val nama = koleksi.value.firstOrNull { it.kunci == k }?.nama
                         ?: "koleksi ${i + 1}"
-                    _pesan.value = "Menyinkron “$nama” (${i + 1}/${kunci.size})…"
+                    _progres.value = "Menyinkron “$nama” (${i + 1}/${kunci.size})…"
                     totalBaru += repo.sinkronKoleksi(k)
                 }
+                _progres.value = null
                 _pesan.value = if (totalBaru > 0) {
-                    "Sinkronisasi selesai: $totalBaru berkas baru dari ${kunci.size} koleksi."
+                    PesanStatus(
+                        NadaStatus.SUKSES,
+                        "Sinkronisasi selesai: $totalBaru berkas baru dari ${kunci.size} koleksi.",
+                    )
                 } else {
-                    "Sinkronisasi selesai: tidak ada berkas baru."
+                    PesanStatus(
+                        NadaStatus.SUKSES,
+                        "Sinkronisasi selesai: tidak ada berkas baru.",
+                    )
                 }
             } catch (e: TelegramException) {
-                _pesan.value = "Sinkronisasi gagal: ${e.pesan}"
+                _progres.value = null
+                _pesan.value = PesanStatus(NadaStatus.GALAT, "Sinkronisasi gagal: ${e.pesan}")
             } catch (e: Exception) {
-                _pesan.value = "Sinkronisasi gagal: ${e.message ?: "galat tak dikenal"}"
+                _progres.value = null
+                _pesan.value = PesanStatus(
+                    NadaStatus.GALAT,
+                    "Sinkronisasi gagal: ${e.message ?: "galat tak dikenal"}",
+                )
             } finally {
                 _memuat.value = false
             }
@@ -185,11 +229,17 @@ class DasborViewModel(
             _memuat.value = true
             try {
                 repo.sinkronSemua()
-                _pesan.value = "Sinkronisasi selesai. Indeks lokal sudah segar."
+                _pesan.value = PesanStatus(
+                    NadaStatus.SUKSES,
+                    "Sinkronisasi selesai. Indeks lokal sudah segar.",
+                )
             } catch (e: TelegramException) {
-                _pesan.value = "Sinkronisasi gagal: ${e.pesan}"
+                _pesan.value = PesanStatus(NadaStatus.GALAT, "Sinkronisasi gagal: ${e.pesan}")
             } catch (e: Exception) {
-                _pesan.value = "Sinkronisasi gagal: ${e.message ?: "galat tak dikenal"}"
+                _pesan.value = PesanStatus(
+                    NadaStatus.GALAT,
+                    "Sinkronisasi gagal: ${e.message ?: "galat tak dikenal"}",
+                )
             } finally {
                 _memuat.value = false
             }
@@ -198,123 +248,289 @@ class DasborViewModel(
 
     /**
      * Tarik dari Telegram: hasilnya masuk tab Impor (bukan daftar pribadi).
-     * Pesan sukses selalu menyebut tab Impor agar user tidak mencari di Dasbor.
+     * Entri BARU tercakup (kunci belum dikenal sebelum tarik) ditanyai
+     * namanya satu per satu lewat popup; entri yang sudah tercakup tidak
+     * ditanya ulang dan namanya tidak pernah ditimpa. Ringkasan tampil
+     * sesudah antrean penamaan habis.
      */
     fun tarikDaftarKoleksi() {
         viewModelScope.launch {
             _memuat.value = true
             try {
+                val sebelum = repo.kunciDikenal()
                 val daftar = repo.tarikDaftarKoleksi()
-                _pesan.value = if (daftar.isEmpty()) {
-                    "Tidak ada koleksi baru dari Telegram. Lihat tab Impor untuk hasil sebelumnya."
+                totalTarik = daftar.size
+                gagalTarik = 0
+                val baru = AntreanPenamaan.baruTercakup(sebelum, daftar)
+                if (baru.isEmpty()) {
+                    _pesan.value = if (daftar.isEmpty()) {
+                        PesanStatus(
+                            NadaStatus.INFO,
+                            "Tidak ada koleksi baru dari Telegram. " +
+                                "Lihat tab Impor untuk hasil sebelumnya.",
+                        )
+                    } else {
+                        PesanStatus(
+                            NadaStatus.SUKSES,
+                            "${daftar.size} koleksi impor diperbarui — lihat di tab Impor.",
+                        )
+                    }
                 } else {
-                    "${daftar.size} koleksi impor diperbarui — lihat di tab Impor."
+                    _antreanTarik.value = AntreanPenamaan.dariTarik(baru)
                 }
             } catch (e: Exception) {
-                _pesan.value = "Gagal menarik daftar koleksi: " +
-                    PenjagaVault.terjemahkanGalatForum(e.message ?: "galat tak dikenal")
+                _pesan.value = PesanStatus(
+                    NadaStatus.GALAT,
+                    "Gagal menarik daftar koleksi: " +
+                        PenjagaVault.terjemahkanGalatForum(e.message ?: "galat tak dikenal"),
+                )
             } finally {
                 _memuat.value = false
             }
         }
     }
 
-    // ---- Koleksi ----
+    /** Simpan nama untuk item Tarik terdepan; field lain dipertahankan. */
+    fun simpanNamaTarik(nama: String) {
+        val item = _antreanTarik.value.firstOrNull() ?: return
+        val kunci = item.kunci ?: return
+        viewModelScope.launch {
+            _memuat.value = true
+            try {
+                val lama = repo.koleksi(kunci)
+                repo.ubahKoleksi(
+                    kunci,
+                    nama.trim(),
+                    lama?.deskripsi.orEmpty(),
+                    lama?.label.orEmpty(),
+                    lama?.warna ?: 0,
+                    lama?.tipeDitangani ?: emptySet(),
+                )
+                _antreanTarik.update { it.drop(1) }
+                if (_antreanTarik.value.isEmpty()) {
+                    ringkasanTarikTertunda = false
+                    _pesan.value = AntreanPenamaan.ringkasanTarik(
+                        totalTarik,
+                        gagalTarik,
+                        " — lihat di tab Impor",
+                    )
+                }
+            } catch (e: Exception) {
+                gagalTarik++
+                _antreanTarik.update { it.drop(1) }
+                if (_antreanTarik.value.isEmpty()) {
+                    // Tunggu popup galat ditutup agar ringkasan tidak menimpanya.
+                    ringkasanTarikTertunda = true
+                }
+                _pesan.value = PesanStatus(
+                    NadaStatus.GALAT,
+                    "Gagal memberi nama koleksi: ${e.message}",
+                )
+            } finally {
+                _memuat.value = false
+            }
+        }
+    }
 
-    /** Parameter pembuatan koleksi terakhir (untuk tombol "coba lagi" vault baru). */
-    private data class PermintaanBuat(
-        val nama: String,
-        val deskripsi: String,
-        val label: String,
-        val warna: Int,
-        val tipe: Set<TipeFile>,
-        val kunci: KunciBaru?,
-    )
-
-    private var permintaanTerakhir: PermintaanBuat? = null
-    private var tundaBerhasil: (() -> Unit)? = null
+    /** Lewati item Tarik terdepan: nama topik/chat dipertahankan. */
+    fun lewatiNamaTarik() {
+        _antreanTarik.update { it.drop(1) }
+        if (_antreanTarik.value.isEmpty()) {
+            ringkasanTarikTertunda = false
+            _pesan.value = AntreanPenamaan.ringkasanTarik(
+                totalTarik,
+                gagalTarik,
+                " — lihat di tab Impor",
+            )
+        }
+    }
 
     /**
-     * True bila kegagalan terakhir membawa tawaran "Buat vault baru & coba
-     * lagi" (vault rusak tetapi dipakai koleksi lain).
+     * Batalkan antrean Tarik: sisanya tetap tersimpan dengan nama topik.
+     * Bila ada rename yang sudah gagal, ringkasannya tetap ditampilkan
+     * agar kegagalan itu tidak hilang diam-diam.
      */
-    private val _tawarkanVaultBaru = MutableStateFlow(false)
-    val tawarkanVaultBaru: StateFlow<Boolean> = _tawarkanVaultBaru.asStateFlow()
+    fun batalkanAntreanTarik() {
+        _antreanTarik.value = emptyList()
+        ringkasanTarikTertunda = false
+        if (gagalTarik > 0) {
+            _pesan.value = AntreanPenamaan.ringkasanTarik(
+                totalTarik,
+                gagalTarik,
+                " — lihat di tab Impor",
+            )
+        }
+    }
+
+    // ---- Koleksi: antrean penamaan per tipe ----
 
     /**
-     * Buat koleksi (satu tombol membereskan vault + topik + kunci).
-     * Form TIDAK di-reset di sini — [onBerhasil] dipanggil hanya bila sukses
-     * sehingga data tetap terisi saat gagal dan user bisa coba lagi.
+     * Mulai antrean penamaan: satu popup per tipe yang dicentang, urutan
+     * [TipeFile.entries]. Pengaturan bersama (deskripsi/label/warna/kunci)
+     * disalin ke tiap item; tiap Simpan membuat SATU topik + SATU koleksi
+     * untuk tipe itu. Form pemanggil di-reset begitu antrean dimulai —
+     * data sudah tersimpan di antrean, bukan di form.
      */
-    fun buatKoleksi(
-        nama: String,
+    fun mulaiBuatAntrean(
         deskripsi: String,
         label: String = "",
         warna: Int = 0,
         tipe: Set<TipeFile> = emptySet(),
         kunci: KunciBaru? = null,
-        onBerhasil: (() -> Unit)? = null,
     ) {
-        if (nama.isBlank()) {
-            _pesan.value = "Nama koleksi belum diisi."
+        if (tipe.isEmpty()) {
+            _pesan.value = PesanStatus(
+                NadaStatus.INFO,
+                "Pilih minimal satu tipe berkas untuk koleksi baru.",
+            )
             return
         }
-        permintaanTerakhir = PermintaanBuat(nama.trim(), deskripsi.trim(), label, warna, tipe, kunci)
-        tundaBerhasil = onBerhasil
+        dibuatBuat = 0
+        gagalBuat = 0
+        itemGagalVault = null
+        _antreanBuat.value = AntreanPenamaan.dariBuat(
+            tipe,
+            deskripsi.trim(),
+            label,
+            warna,
+            kunci,
+        )
+    }
+
+    /** Simpan nama untuk item Buat terdepan: SATU topik + SATU koleksi. */
+    fun simpanNamaBuat(nama: String) {
+        val item = _antreanBuat.value.firstOrNull() ?: return
+        val tipe = item.tipe ?: return
         viewModelScope.launch {
             _memuat.value = true
             try {
-                val m = permintaanTerakhir ?: return@launch
-                repo.buatKoleksi(m.nama, m.deskripsi, m.label, m.warna, m.tipe, m.kunci)
-                _tawarkanVaultBaru.value = false
-                _pesan.value = "Koleksi \"${m.nama}\" dibuat di Telegram."
-                tundaBerhasil?.invoke()
-                tundaBerhasil = null
-                permintaanTerakhir = null
+                repo.buatKoleksi(
+                    nama.trim(),
+                    item.deskripsi,
+                    item.label,
+                    item.warna,
+                    setOf(tipe),
+                    item.kunciRahasia,
+                )
+                dibuatBuat++
+                _antreanBuat.update { it.drop(1) }
+                if (_antreanBuat.value.isEmpty()) {
+                    // Ringkasan ditampilkan sekarang: flag tertunda (dari
+                    // galat sebelumnya) dibersihkan agar Mengerti tidak
+                    // menampilkan ringkasan yang sama untuk kedua kalinya.
+                    ringkasanBuatTertunda = false
+                    _pesan.value = AntreanPenamaan.ringkasanBuat(dibuatBuat, gagalBuat)
+                }
             } catch (e: GalatButuhVaultBaru) {
                 // Vault rusak + dipakai koleksi lain: vault lama dipertahankan,
-                // UI menawarkan tombol aksi (pesan dibawa apa adanya).
-                _tawarkanVaultBaru.value = true
-                _pesan.value = "Gagal membuat koleksi: ${e.pesan}"
+                // popup galat menawarkan tombol aksi "Buat vault baru & coba lagi".
+                // Simpan NAMA KETIKAN USER (bukan prefill label tipe) agar
+                // retry memakai nama yang dipilih user di popup.
+                itemGagalVault = item.copy(prefill = nama.trim())
+                _antreanBuat.update { it.drop(1) }
+                if (_antreanBuat.value.isEmpty()) {
+                    ringkasanBuatTertunda = true
+                }
+                _pesan.value = PesanStatus(
+                    NadaStatus.GALAT,
+                    "Gagal membuat koleksi: ${e.pesan}",
+                    aksiUlang = true,
+                )
             } catch (e: Exception) {
-                _tawarkanVaultBaru.value = false
-                _pesan.value = "Gagal membuat koleksi: " +
-                    PenjagaVault.terjemahkanGalatForum(e.message ?: "galat tak dikenal")
+                gagalBuat++
+                _antreanBuat.update { it.drop(1) }
+                if (_antreanBuat.value.isEmpty()) {
+                    ringkasanBuatTertunda = true
+                }
+                _pesan.value = PesanStatus(
+                    NadaStatus.GALAT,
+                    "Gagal membuat koleksi: " +
+                        PenjagaVault.terjemahkanGalatForum(e.message ?: "galat tak dikenal"),
+                )
             } finally {
                 _memuat.value = false
             }
         }
     }
 
+    /** Lewati item Buat terdepan: tipe itu tidak dibuat. */
+    fun lewatiNamaBuat() {
+        _antreanBuat.update { it.drop(1) }
+        if (_antreanBuat.value.isEmpty()) {
+            ringkasanBuatTertunda = false
+            _pesan.value = AntreanPenamaan.ringkasanBuat(dibuatBuat, gagalBuat)
+        }
+    }
+
+    /**
+     * Batalkan antrean Buat: berhenti, yang sudah dibuat tetap dibuat.
+     * Ringkasan tampil hanya bila ada yang sudah dibuat/gagal.
+     */
+    fun batalkanAntreanBuat() {
+        _antreanBuat.value = emptyList()
+        itemGagalVault = null
+        ringkasanBuatTertunda = false
+        if (dibuatBuat > 0 || gagalBuat > 0) {
+            _pesan.value = AntreanPenamaan.ringkasanBuat(dibuatBuat, gagalBuat)
+        }
+    }
+
     /**
      * Aksi tombol "Buat vault baru & coba lagi": buat vault forum baru,
-     * jadikan aktif, lalu ulangi pembuatan koleksi dengan data form yang sama.
+     * jadikan aktif, lalu ulangi pembuatan item yang gagal tadi saja.
      * Vault lama + koleksinya tidak dihapus/diutak-atik.
      */
     fun buatVaultBaruDanCobaLagi() {
-        val m = permintaanTerakhir ?: return
+        val item = itemGagalVault ?: return
+        val tipe = item.tipe ?: return
         viewModelScope.launch {
             _memuat.value = true
+            _pesan.value = null
             try {
                 val hasil = repo.buatVaultBaru()
-                repo.buatKoleksi(m.nama, m.deskripsi, m.label, m.warna, m.tipe, m.kunci)
-                _tawarkanVaultBaru.value = false
-                _pesan.value = if (hasil.dibuatBaru) {
-                    "Vault baru dibuat; koleksi \"${m.nama}\" dibuat di Telegram."
-                } else {
-                    "Vault \"${hasil.nama}\" sudah ada, dipakai lagi; " +
-                        "koleksi \"${m.nama}\" dibuat di Telegram."
+                repo.buatKoleksi(
+                    item.prefill,
+                    item.deskripsi,
+                    item.label,
+                    item.warna,
+                    setOf(tipe),
+                    item.kunciRahasia,
+                )
+                itemGagalVault = null
+                dibuatBuat++
+                if (_antreanBuat.value.isEmpty()) {
+                    _pesan.value = if (hasil.dibuatBaru) {
+                        PesanStatus(
+                            NadaStatus.SUKSES,
+                            "Vault baru dibuat; " +
+                                AntreanPenamaan.ringkasanBuat(dibuatBuat, gagalBuat).teks,
+                        )
+                    } else {
+                        PesanStatus(
+                            NadaStatus.SUKSES,
+                            "Vault “${hasil.nama}” sudah ada, dipakai lagi; " +
+                                AntreanPenamaan.ringkasanBuat(dibuatBuat, gagalBuat).teks,
+                        )
+                    }
+                    ringkasanBuatTertunda = false
                 }
-                tundaBerhasil?.invoke()
-                tundaBerhasil = null
-                permintaanTerakhir = null
             } catch (e: GalatButuhVaultBaru) {
-                _tawarkanVaultBaru.value = true
-                _pesan.value = "Gagal membuat koleksi: ${e.pesan}"
+                _pesan.value = PesanStatus(
+                    NadaStatus.GALAT,
+                    "Gagal membuat koleksi: ${e.pesan}",
+                    aksiUlang = true,
+                )
             } catch (e: Exception) {
-                _tawarkanVaultBaru.value = false
-                _pesan.value = "Gagal membuat koleksi: " +
-                    PenjagaVault.terjemahkanGalatForum(e.message ?: "galat tak dikenal")
+                gagalBuat++
+                itemGagalVault = null
+                if (_antreanBuat.value.isEmpty()) {
+                    ringkasanBuatTertunda = true
+                }
+                _pesan.value = PesanStatus(
+                    NadaStatus.GALAT,
+                    "Gagal membuat koleksi: " +
+                        PenjagaVault.terjemahkanGalatForum(e.message ?: "galat tak dikenal"),
+                )
             } finally {
                 _memuat.value = false
             }
@@ -330,16 +546,19 @@ class DasborViewModel(
         tipe: Set<TipeFile> = emptySet(),
     ) {
         if (nama.isBlank()) {
-            _pesan.value = "Nama koleksi belum diisi."
+            _pesan.value = PesanStatus(NadaStatus.GALAT, "Nama koleksi belum diisi.")
             return
         }
         viewModelScope.launch {
             _memuat.value = true
             try {
                 repo.ubahKoleksi(kunci, nama.trim(), deskripsi.trim(), label, warna, tipe)
-                _pesan.value = "Koleksi diperbarui."
+                _pesan.value = PesanStatus(NadaStatus.SUKSES, "Koleksi diperbarui.")
             } catch (e: Exception) {
-                _pesan.value = "Gagal memperbarui koleksi: ${e.message}"
+                _pesan.value = PesanStatus(
+                    NadaStatus.GALAT,
+                    "Gagal memperbarui koleksi: ${e.message}",
+                )
             } finally {
                 _memuat.value = false
             }
@@ -353,13 +572,22 @@ class DasborViewModel(
             try {
                 val n = repo.perbaikiTopikHilang()
                 _pesan.value = if (n > 0) {
-                    "$n topik dibuat ulang di Telegram."
+                    PesanStatus(
+                        NadaStatus.SUKSES,
+                        "$n topik dibuat ulang di Telegram.",
+                    )
                 } else {
-                    "Semua topik kategori sudah ada di Telegram."
+                    PesanStatus(
+                        NadaStatus.INFO,
+                        "Semua topik kategori sudah ada di Telegram.",
+                    )
                 }
             } catch (e: Exception) {
-                _pesan.value = "Gagal memeriksa topik: " +
-                    PenjagaVault.terjemahkanGalatForum(e.message ?: "galat tak dikenal")
+                _pesan.value = PesanStatus(
+                    NadaStatus.GALAT,
+                    "Gagal memeriksa topik: " +
+                        PenjagaVault.terjemahkanGalatForum(e.message ?: "galat tak dikenal"),
+                )
             } finally {
                 _memuat.value = false
             }
@@ -371,9 +599,12 @@ class DasborViewModel(
             _memuat.value = true
             try {
                 repo.hapusKoleksi(kunci, tinggalkanChannel)
-                _pesan.value = "Koleksi dihapus dari arsip."
+                _pesan.value = PesanStatus(NadaStatus.SUKSES, "Koleksi dihapus dari arsip.")
             } catch (e: Exception) {
-                _pesan.value = "Gagal menghapus koleksi: ${e.message}"
+                _pesan.value = PesanStatus(
+                    NadaStatus.GALAT,
+                    "Gagal menghapus koleksi: ${e.message}",
+                )
             } finally {
                 _memuat.value = false
             }
@@ -419,22 +650,45 @@ class DasborViewModel(
             try {
                 repo.ubahKunci(kunci, rahasiaLama, kunciBaru)
                 _pesan.value = if (kunciBaru == null) {
-                    "Kunci koleksi dihapus."
+                    PesanStatus(NadaStatus.SUKSES, "Kunci koleksi dihapus.")
                 } else {
-                    "Kunci koleksi diperbarui."
+                    PesanStatus(NadaStatus.SUKSES, "Kunci koleksi diperbarui.")
                 }
             } catch (e: TelegramException) {
-                _pesan.value = e.pesan
+                _pesan.value = PesanStatus(NadaStatus.GALAT, e.pesan)
             } catch (e: Exception) {
-                _pesan.value = e.message ?: "Gagal mengubah kunci."
+                _pesan.value = PesanStatus(
+                    NadaStatus.GALAT,
+                    e.message ?: "Gagal mengubah kunci.",
+                )
             } finally {
                 _memuat.value = false
             }
         }
     }
 
+    /**
+     * Tutup popup status. Menutup popup galat yang menunda ringkasan
+     * (antrean sudah habis saat gagal) menampilkan ringkasan itu; menutup
+     * popup galat vault membatalkan retry yang belum dieksekusi.
+     */
     fun habiskanPesan() {
         _pesan.value = null
+        itemGagalVault = null
+        when {
+            ringkasanBuatTertunda -> {
+                ringkasanBuatTertunda = false
+                _pesan.value = AntreanPenamaan.ringkasanBuat(dibuatBuat, gagalBuat)
+            }
+            ringkasanTarikTertunda -> {
+                ringkasanTarikTertunda = false
+                _pesan.value = AntreanPenamaan.ringkasanTarik(
+                    totalTarik,
+                    gagalTarik,
+                    " — lihat di tab Impor",
+                )
+            }
+        }
     }
 
     companion object {

@@ -9,6 +9,7 @@ import com.arsipsenja.data.local.KunciKoleksi
 import com.arsipsenja.data.repo.ArsipRepository
 import com.arsipsenja.data.telegram.ProgresBerkas
 import com.arsipsenja.data.telegram.TelegramClient
+import com.arsipsenja.data.work.UploadWorker
 import java.util.UUID
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -41,8 +42,19 @@ class UnggahViewModel(
     /** True: tiap berkas dirutekan ke kategori sesuai tipe berkasnya. */
     val ruteOtomatis: StateFlow<Boolean> = _ruteOtomatis.asStateFlow()
 
-    private val _pesan = MutableStateFlow<String?>(null)
-    val pesan: StateFlow<String?> = _pesan.asStateFlow()
+    private val _pesan = MutableStateFlow<PesanStatus?>(null)
+    val pesan: StateFlow<PesanStatus?> = _pesan.asStateFlow()
+
+    /**
+     * Popup galat untuk pekerjaan yang FAILED terminal — sekali per
+     * pekerjaan per masa hidup ViewModel. Alasan dari outputData
+     * [UploadWorker], BUKAN per percobaan retry. Teks per baris antrean
+     * tetap tampil; popup ini yang membuat kegagalan "kelihatan".
+     */
+    private val _galatUnggah = MutableStateFlow<PesanStatus?>(null)
+    val galatUnggah: StateFlow<PesanStatus?> = _galatUnggah.asStateFlow()
+
+    private val gagalDilaporkan = mutableSetOf<UUID>()
 
     /** Antrean pekerjaan unggah (baru → lama), termasuk yang sudah selesai. */
     val antrean: StateFlow<List<WorkInfo>> =
@@ -74,6 +86,21 @@ class UnggahViewModel(
                 if (_koleksiTerpilih.value == null) {
                     _koleksiTerpilih.value = daftar.firstOrNull()?.kunci
                 }
+            }
+        }
+        viewModelScope.launch {
+            antrean.collect { daftar ->
+                if (_galatUnggah.value != null) return@collect
+                val gagal = daftar.firstOrNull {
+                    it.state == WorkInfo.State.FAILED && it.id !in gagalDilaporkan
+                } ?: return@collect
+                gagalDilaporkan.add(gagal.id)
+                val alasan = gagal.outputData.getString(UploadWorker.K_PESAN_GALAT)
+                    ?: "Unggah gagal."
+                _galatUnggah.value = PesanStatus(
+                    NadaStatus.GALAT,
+                    "Unggahan gagal: $alasan",
+                )
             }
         }
     }
@@ -116,7 +143,7 @@ class UnggahViewModel(
      */
     fun mulaiUnggah(uris: List<android.net.Uri>) {
         if (uris.isEmpty()) {
-            _pesan.value = "Belum ada berkas yang dipilih."
+            _pesan.value = PesanStatus(NadaStatus.GALAT, "Belum ada berkas yang dipilih.")
             return
         }
         viewModelScope.launch {
@@ -128,48 +155,84 @@ class UnggahViewModel(
                         .map { it.kunci }
                         .toSet()
                     val hasil = repo.unggahOtomatis(uris, terkunci)
-                    _pesan.value = if (hasil.size == 1) {
-                        "${uris.size} berkas dirutekan otomatis ke kategori."
-                    } else {
-                        "${uris.size} berkas dirutekan otomatis ke ${hasil.size} kategori."
-                    } + if (terkunci.isNotEmpty()) {
-                        " (${terkunci.size} koleksi terkunci dilewati.)"
-                    } else {
-                        ""
-                    }
+                    _pesan.value = PesanStatus(
+                        NadaStatus.INFO,
+                        if (hasil.size == 1) {
+                            "${uris.size} berkas dirutekan otomatis ke kategori."
+                        } else {
+                            "${uris.size} berkas dirutekan otomatis ke ${hasil.size} kategori."
+                        } + if (terkunci.isNotEmpty()) {
+                            " (${terkunci.size} koleksi terkunci dilewati.)"
+                        } else {
+                            ""
+                        },
+                    )
                 } else {
                     val tujuan = _koleksiTerpilih.value
                     if (tujuan == null) {
-                        _pesan.value = "Pilih koleksi tujuan terlebih dahulu."
+                        _pesan.value = PesanStatus(
+                            NadaStatus.GALAT,
+                            "Pilih koleksi tujuan terlebih dahulu.",
+                        )
                         return@launch
                     }
                     val entitas = koleksi.value.firstOrNull { it.kunci == tujuan }
                     if (perluBukaKunci(entitas)) {
-                        _pesan.value = "Koleksi \"${entitas?.nama ?: "tujuan"}\" terkunci — buka dulu kuncinya."
+                        _pesan.value = PesanStatus(
+                            NadaStatus.GALAT,
+                            "Koleksi \"${entitas?.nama ?: "tujuan"}\" terkunci — buka dulu kuncinya.",
+                        )
                         return@launch
                     }
                     repo.mulaiUnggah(uris, tujuan)
-                    _pesan.value = "${uris.size} berkas masuk antrean unggah."
+                    _pesan.value = PesanStatus(
+                        NadaStatus.SUKSES,
+                        "${uris.size} berkas masuk antrean unggah.",
+                    )
                 }
             } catch (e: Exception) {
-                _pesan.value = "Gagal mengantre unggah: ${e.message}"
+                _pesan.value = PesanStatus(
+                    NadaStatus.GALAT,
+                    "Gagal mengantre unggah: ${e.message}",
+                )
             }
         }
     }
 
     fun batalkan(id: UUID) {
         workManager.cancelWorkById(id)
-        _pesan.value = "Pekerjaan unggah dibatalkan."
+        _pesan.value = PesanStatus(NadaStatus.INFO, "Pekerjaan unggah dibatalkan.")
     }
 
     fun batalkanSemua() {
         workManager.cancelAllWorkByTag(ArsipRepository.TAG_UNGGAH)
         _transfer.value = emptyMap()
-        _pesan.value = "Seluruh antrean unggah dibatalkan."
+        _pesan.value = PesanStatus(
+            NadaStatus.INFO,
+            "Seluruh antrean unggah dibatalkan.",
+        )
     }
 
     fun habiskanPesan() {
         _pesan.value = null
+    }
+
+    /**
+     * Tutup popup galat unggah, lalu pindai antrean untuk pekerjaan FAILED
+     * berikutnya yang belum dilaporkan (bila ada, popupnya tampil lagi).
+     */
+    fun habiskanGalatUnggah() {
+        _galatUnggah.value = null
+        val berikut = antrean.value.firstOrNull {
+            it.state == WorkInfo.State.FAILED && it.id !in gagalDilaporkan
+        } ?: return
+        gagalDilaporkan.add(berikut.id)
+        val alasan = berikut.outputData.getString(UploadWorker.K_PESAN_GALAT)
+            ?: "Unggah gagal."
+        _galatUnggah.value = PesanStatus(
+            NadaStatus.GALAT,
+            "Unggahan gagal: $alasan",
+        )
     }
 
     /** Gabungkan nama koleksi terpilih untuk label layar. */

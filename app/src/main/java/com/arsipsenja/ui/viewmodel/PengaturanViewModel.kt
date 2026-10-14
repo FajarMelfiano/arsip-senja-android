@@ -60,8 +60,8 @@ class PengaturanViewModel(
     private val _memuatVault = MutableStateFlow(false)
     val memuatVault: StateFlow<Boolean> = _memuatVault.asStateFlow()
 
-    private val _pesanVault = MutableStateFlow<String?>(null)
-    val pesanVault: StateFlow<String?> = _pesanVault.asStateFlow()
+    private val _pesanVault = MutableStateFlow<PesanStatus?>(null)
+    val pesanVault: StateFlow<PesanStatus?> = _pesanVault.asStateFlow()
 
     /** Alasan terakhir gagal memuat daftar grup (ditampilkan di dialog). */
     private val _galatKandidat = MutableStateFlow<String?>(null)
@@ -96,20 +96,26 @@ class PengaturanViewModel(
                 when (val hasil = repo.periksaDanAdopsiVault()) {
                     is ArsipRepository.HasilPeriksaVault.Diadopsi -> {
                         _vaultAktif.value = hasil.kandidat.chatId
-                        _pesanVault.value =
-                            PenjagaVault.pesanAdopsiOtomatis(hasil.kandidat.nama)
+                        _pesanVault.value = PesanStatus(
+                            NadaStatus.INFO,
+                            PenjagaVault.pesanAdopsiOtomatis(hasil.kandidat.nama),
+                        )
                     }
                     is ArsipRepository.HasilPeriksaVault.BanyakKandidat -> {
-                        _pesanVault.value =
-                            PenjagaVault.pesanBanyakKandidat(hasil.jumlah)
+                        _pesanVault.value = PesanStatus(
+                            NadaStatus.INFO,
+                            PenjagaVault.pesanBanyakKandidat(hasil.jumlah),
+                        )
                     }
                     ArsipRepository.HasilPeriksaVault.TidakAdaAksi -> Unit
                 }
                 _infoVault.value = repo.infoVaultAktif()
             } catch (e: Exception) {
-                _pesanVault.value =
+                _pesanVault.value = PesanStatus(
+                    NadaStatus.GALAT,
                     "Gagal memeriksa status vault: ${e.message}. " +
-                        "Coba buka lagi Pengaturan."
+                        "Coba buka lagi Pengaturan.",
+                )
             }
         }
     }
@@ -125,7 +131,10 @@ class PengaturanViewModel(
                 // Jangan biarkan dialog menampilkan empty state yang
                 // menyesatkan saat pemuatan yang gagal — tampilkan alasannya.
                 _galatKandidat.value = "Gagal memuat grup: ${e.message}"
-                _pesanVault.value = "Gagal memuat grup: ${e.message}"
+                _pesanVault.value = PesanStatus(
+                    NadaStatus.GALAT,
+                    "Gagal memuat grup: ${e.message}",
+                )
             } finally {
                 _memuatVault.value = false
             }
@@ -138,11 +147,15 @@ class PengaturanViewModel(
             try {
                 val forumBaru = repo.pilihVault(chatId)
                 _vaultAktif.value = chatId
-                _pesanVault.value = if (forumBaru) {
-                    "Mode forum diaktifkan di grup ini. Koleksi baru akan dibuat sebagai topik."
-                } else {
-                    "Vault diganti. Koleksi baru akan dibuat sebagai topik di grup ini."
-                }
+                _pesanVault.value = PesanStatus(
+                    NadaStatus.SUKSES,
+                    if (forumBaru) {
+                        "Mode forum diaktifkan di grup ini. " +
+                            "Koleksi baru akan dibuat sebagai topik."
+                    } else {
+                        "Vault diganti. Koleksi baru akan dibuat sebagai topik di grup ini."
+                    },
+                )
                 // Optimistis: tampilkan nama + status baru SEKARANG, jangan
                 // tunggu refresh async — sebelumnya banner "Vault diganti"
                 // tampil sementara baris vault masih menunjukkan nama lama.
@@ -155,7 +168,10 @@ class PengaturanViewModel(
                 )
                 muatInfoVault()
             } catch (e: Exception) {
-                _pesanVault.value = "Gagal memilih vault: ${e.message}"
+                _pesanVault.value = PesanStatus(
+                    NadaStatus.GALAT,
+                    "Gagal memilih vault: ${e.message}",
+                )
             } finally {
                 _memuatVault.value = false
             }
@@ -171,12 +187,21 @@ class PengaturanViewModel(
                 _vaultAktif.value = info.chatId
                 _infoVault.value = info
                 _pesanVault.value = if (info.forumSiap) {
-                    "Vault \"${info.nama}\" sudah forum dan siap dipakai."
+                    PesanStatus(
+                        NadaStatus.SUKSES,
+                        "Vault \"${info.nama}\" sudah forum dan siap dipakai.",
+                    )
                 } else {
-                    "Vault belum siap: ${info.masalah ?: "periksa lagi nanti."}"
+                    PesanStatus(
+                        NadaStatus.GALAT,
+                        "Vault belum siap: ${info.masalah ?: "periksa lagi nanti."}",
+                    )
                 }
             } catch (e: Exception) {
-                _pesanVault.value = "Gagal memperbaiki vault: ${e.message}"
+                _pesanVault.value = PesanStatus(
+                    NadaStatus.GALAT,
+                    "Gagal memperbaiki vault: ${e.message}",
+                )
             } finally {
                 _memuatVault.value = false
             }
@@ -191,9 +216,15 @@ class PengaturanViewModel(
                 val hasil = repo.buatVaultBaru(bersih)
                 _vaultAktif.value = hasil.chatId
                 _pesanVault.value = if (hasil.dibuatBaru) {
-                    "Vault \"${hasil.nama}\" dibuat dan dijadikan aktif."
+                    PesanStatus(
+                        NadaStatus.SUKSES,
+                        "Vault \"${hasil.nama}\" dibuat dan dijadikan aktif.",
+                    )
                 } else {
-                    PenjagaVault.pesanVaultSudahAda(hasil.nama)
+                    PesanStatus(
+                        NadaStatus.INFO,
+                        PenjagaVault.pesanVaultSudahAda(hasil.nama),
+                    )
                 }
                 // Optimistis: dedupe hanya mengadopsi kandidat forum-siap
                 // dan pembuatan baru sudah diverifikasi sebagai grup forum
@@ -208,7 +239,10 @@ class PengaturanViewModel(
                 )
                 muatInfoVault()
             } catch (e: Exception) {
-                _pesanVault.value = "Gagal membuat vault: ${e.message}"
+                _pesanVault.value = PesanStatus(
+                    NadaStatus.GALAT,
+                    "Gagal membuat vault: ${e.message}",
+                )
             } finally {
                 _memuatVault.value = false
             }
@@ -222,8 +256,8 @@ class PengaturanViewModel(
     private val _adaKredensial = MutableStateFlow(pengaturan.adaKredensial())
     val adaKredensial: StateFlow<Boolean> = _adaKredensial.asStateFlow()
 
-    private val _galat = MutableStateFlow<String?>(null)
-    val galat: StateFlow<String?> = _galat.asStateFlow()
+    private val _galat = MutableStateFlow<PesanStatus?>(null)
+    val galat: StateFlow<PesanStatus?> = _galat.asStateFlow()
 
     private val _sibuk = MutableStateFlow(false)
     val sibuk: StateFlow<Boolean> = _sibuk.asStateFlow()
@@ -244,9 +278,15 @@ class PengaturanViewModel(
     fun gantiKredensial(apiId: String, apiHash: String) {
         val id = apiId.toIntOrNull()
         when {
-            id == null || id <= 0 -> _galat.value = "api_id belum diisi dengan benar."
+            id == null || id <= 0 -> _galat.value = PesanStatus(
+                NadaStatus.GALAT,
+                "api_id belum diisi dengan benar.",
+            )
             apiHash.trim().length < 16 ->
-                _galat.value = "api_hash minimal 16 karakter."
+                _galat.value = PesanStatus(
+                    NadaStatus.GALAT,
+                    "api_hash minimal 16 karakter.",
+                )
             else -> {
                 _sibuk.value = true
                 viewModelScope.launch {
@@ -255,9 +295,12 @@ class PengaturanViewModel(
                         _adaKredensial.value = pengaturan.adaKredensial()
                         _galat.value = null
                     } catch (e: TelegramException) {
-                        _galat.value = e.pesan
+                        _galat.value = PesanStatus(NadaStatus.GALAT, e.pesan)
                     } catch (e: Exception) {
-                        _galat.value = e.message ?: "Gagal menyimpan kredensial."
+                        _galat.value = PesanStatus(
+                            NadaStatus.GALAT,
+                            e.message ?: "Gagal menyimpan kredensial.",
+                        )
                     } finally {
                         _sibuk.value = false
                     }
@@ -285,7 +328,10 @@ class PengaturanViewModel(
                 repo.sinkronSemua()
                 _galat.value = null
             } catch (e: Exception) {
-                _galat.value = "Sinkronisasi gagal: ${e.message}"
+                _galat.value = PesanStatus(
+                    NadaStatus.GALAT,
+                    "Sinkronisasi gagal: ${e.message}",
+                )
             } finally {
                 _sibuk.value = false
             }

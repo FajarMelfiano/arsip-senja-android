@@ -29,8 +29,8 @@ class LoginViewModel(
     private val _kredensial = MutableStateFlow(Kredensial())
     val kredensial: StateFlow<Kredensial> = _kredensial.asStateFlow()
 
-    private val _galat = MutableStateFlow<String?>(null)
-    val galat: StateFlow<String?> = _galat.asStateFlow()
+    private val _galat = MutableStateFlow<PesanStatus?>(null)
+    val galat: StateFlow<PesanStatus?> = _galat.asStateFlow()
 
     private val _sibuk = MutableStateFlow(false)
     val sibuk: StateFlow<Boolean> = _sibuk.asStateFlow()
@@ -74,9 +74,12 @@ class LoginViewModel(
         val hash = _kredensial.value.apiHash
         when {
             id == null || id <= 0 ->
-                _galat.value = "api_id belum diisi dengan benar."
+                _galat.value = PesanStatus(NadaStatus.GALAT, "api_id belum diisi dengan benar.")
             hash.length < 16 ->
-                _galat.value = "api_hash minimal 16 karakter. Salin persis dari my.telegram.org."
+                _galat.value = PesanStatus(
+                    NadaStatus.GALAT,
+                    "api_hash minimal 16 karakter. Salin persis dari my.telegram.org.",
+                )
             else -> {
                 _galat.value = null
                 jalankan { telegram.simpanKredensialDanMulai(id, hash) }
@@ -94,7 +97,7 @@ class LoginViewModel(
     fun kirimNomor() {
         val nilai = _nomor.value.trim()
         if (nilai.filter(Char::isDigit).length < 6) {
-            _galat.value = "Nomor telepon belum lengkap."
+            _galat.value = PesanStatus(NadaStatus.GALAT, "Nomor telepon belum lengkap.")
             return
         }
         jalankan { telegram.setNomorTelepon(nilai) }
@@ -108,7 +111,7 @@ class LoginViewModel(
     fun kirimKode() {
         val nilai = _kode.value.trim()
         if (nilai.length < 4) {
-            _galat.value = "Kode verifikasi minimal 4 digit."
+            _galat.value = PesanStatus(NadaStatus.GALAT, "Kode verifikasi minimal 4 digit.")
             return
         }
         jalankan { telegram.cekKode(nilai) }
@@ -121,7 +124,7 @@ class LoginViewModel(
 
     fun kirimSandi() {
         if (_sandi.value.isEmpty()) {
-            _galat.value = "Kata sandi belum diisi."
+            _galat.value = PesanStatus(NadaStatus.GALAT, "Kata sandi belum diisi.")
             return
         }
         jalankan { telegram.cekSandi(_sandi.value) }
@@ -136,7 +139,7 @@ class LoginViewModel(
     fun daftarkanAkun() {
         val r = _registrasi.value
         if (r.depan.isBlank()) {
-            _galat.value = "Nama depan wajib diisi."
+            _galat.value = PesanStatus(NadaStatus.GALAT, "Nama depan wajib diisi.")
             return
         }
         jalankan { telegram.daftarkanAkun(r.depan, r.belakang) }
@@ -153,9 +156,12 @@ class LoginViewModel(
             try {
                 blok()
             } catch (e: TelegramException) {
-                _galat.value = e.pesan
+                _galat.value = PesanStatus(NadaStatus.GALAT, e.pesan)
             } catch (e: Exception) {
-                _galat.value = e.message ?: "Galat tak terduga. Coba lagi."
+                _galat.value = PesanStatus(
+                    NadaStatus.GALAT,
+                    e.message ?: "Galat tak terduga. Coba lagi.",
+                )
             } finally {
                 _sibuk.value = false
             }

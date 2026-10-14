@@ -36,11 +36,10 @@ import com.arsipsenja.data.local.KoleksiEntity
 import com.arsipsenja.data.telegram.ProgresBerkas
 import com.arsipsenja.data.work.UploadWorker
 import com.arsipsenja.ui.components.ArahTransfer
-import com.arsipsenja.ui.components.BilahPesan
 import com.arsipsenja.ui.components.ChipArsip
 import com.arsipsenja.ui.components.KeadaanKosong
-import com.arsipsenja.ui.components.NadaPesan
 import com.arsipsenja.ui.components.ProgresTransfer
+import com.arsipsenja.ui.components.PopupStatus
 import com.arsipsenja.ui.components.SheetBukaKunci
 import com.arsipsenja.ui.components.TombolCadangan
 import com.arsipsenja.ui.components.TombolUtama
@@ -66,6 +65,7 @@ fun UnggahScreen() {
     val antrean by vm.antrean.collectAsState()
     val transfer by vm.transfer.collectAsState()
     val pesan by vm.pesan.collectAsState()
+    val galatUnggah by vm.galatUnggah.collectAsState()
     val dibuka by vm.koleksiTerbuka.collectAsState()
 
     var bukaUntuk by remember { mutableStateOf<KoleksiEntity?>(null) }
@@ -96,14 +96,6 @@ fun UnggahScreen() {
             .fillMaxSize()
             .padding(horizontal = 16.dp),
     ) {
-        BilahPesan(
-            pesan = pesan,
-            nada = if (pesan?.contains("Gagal", true) == true) NadaPesan.SALAH
-            else NadaPesan.BAIK,
-            onTutup = vm::habiskanPesan,
-        )
-        if (pesan != null) Spacer(Modifier.height(8.dp))
-
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(
@@ -306,6 +298,17 @@ fun UnggahScreen() {
             onBiometrikLolos = { vm.bukaKunciBiometrik(target.kunci) },
         )
     }
+
+    // Satu popup status dalam satu waktu: pesan aksi (antrean, batal)
+    // didahulukan; galat FAILED terminal satu pekerjaan menyusul setelah
+    // popup aksi ditutup — habiskanGalatUnggah lalu memindai FAILED
+    // berikutnya yang belum dilaporkan.
+    PopupStatus(
+        pesan = pesan ?: galatUnggah,
+        onTutup = {
+            if (pesan != null) vm.habiskanPesan() else vm.habiskanGalatUnggah()
+        },
+    )
 }
 
 @Composable

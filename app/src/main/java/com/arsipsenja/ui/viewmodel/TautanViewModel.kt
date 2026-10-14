@@ -27,8 +27,8 @@ class TautanViewModel(
     val koleksi: StateFlow<List<KoleksiEntity>> = repo.alirKoleksiPribadi()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    private val _pesan = MutableStateFlow<String?>(null)
-    val pesan: StateFlow<String?> = _pesan.asStateFlow()
+    private val _pesan = MutableStateFlow<PesanStatus?>(null)
+    val pesan: StateFlow<PesanStatus?> = _pesan.asStateFlow()
 
     private val _sibuk = MutableStateFlow(false)
     val sibuk: StateFlow<Boolean> = _sibuk.asStateFlow()
@@ -42,9 +42,9 @@ class TautanViewModel(
             try {
                 _hasilBaru.value = repo.buatTautanUndangan(chatId)
             } catch (e: TelegramException) {
-                _pesan.value = "Gagal membuat tautan undangan: ${e.pesan}"
+                _pesan.value = PesanStatus(NadaStatus.GALAT, "Gagal membuat tautan undangan: ${e.pesan}")
             } catch (e: Exception) {
-                _pesan.value = "Gagal membuat tautan undangan: ${e.message}"
+                _pesan.value = PesanStatus(NadaStatus.GALAT, "Gagal membuat tautan undangan: ${e.message}")
             } finally {
                 _sibuk.value = false
             }
@@ -56,11 +56,11 @@ class TautanViewModel(
             _sibuk.value = true
             try {
                 repo.cabutTautan(id)
-                _pesan.value = "Tautan dicabut dan tak lagi berlaku."
+                _pesan.value = PesanStatus(NadaStatus.SUKSES, "Tautan dicabut dan tak lagi berlaku.")
             } catch (e: TelegramException) {
-                _pesan.value = "Gagal mencabut tautan: ${e.pesan}"
+                _pesan.value = PesanStatus(NadaStatus.GALAT, "Gagal mencabut tautan: ${e.pesan}")
             } catch (e: Exception) {
-                _pesan.value = "Gagal mencabut tautan: ${e.message}"
+                _pesan.value = PesanStatus(NadaStatus.GALAT, "Gagal mencabut tautan: ${e.message}")
             } finally {
                 _sibuk.value = false
             }
@@ -71,9 +71,9 @@ class TautanViewModel(
         viewModelScope.launch {
             try {
                 repo.hapusCatatanTautan(id)
-                _pesan.value = "Catatan tautan dihapus."
+                _pesan.value = PesanStatus(NadaStatus.SUKSES, "Catatan tautan dihapus.")
             } catch (e: Exception) {
-                _pesan.value = "Gagal menghapus: ${e.message}"
+                _pesan.value = PesanStatus(NadaStatus.GALAT, "Gagal menghapus: ${e.message}")
             }
         }
     }
