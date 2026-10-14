@@ -27,15 +27,27 @@ class KueriTampilanTest {
     fun `filter tipe dan koleksi digabung and`() {
         val q = KueriTampilan(
             tipe = TipeFile.VIDEO,
-            koleksiId = -100123L,
+            kunciKoleksi = KunciKoleksi(chatId = -100123L),
             urut = UrutBerkas.UKURAN,
             arah = ArahUrut.NAIK,
         ).bangun()
         assertThat(q.sql).isEqualTo(
-            "SELECT * FROM berkas_arsip WHERE tipe = ? AND koleksiId = ? " +
+            "SELECT * FROM berkas_arsip WHERE tipe = ? AND koleksiId = ? AND topicId = 0 " +
                 "ORDER BY ukuran ASC, nomorKatalog DESC",
         )
         assertThat(q.arguments).containsExactly("VIDEO", -100123L).inOrder()
+    }
+
+    @Test
+    fun `filter koleksi topik memakai chatId dan topicId`() {
+        val q = KueriTampilan(
+            kunciKoleksi = KunciKoleksi(chatId = -100456L, topicId = 3),
+        ).bangun()
+        assertThat(q.sql).isEqualTo(
+            "SELECT * FROM berkas_arsip WHERE koleksiId = ? AND topicId = ? " +
+                "ORDER BY tanggal DESC, nomorKatalog DESC",
+        )
+        assertThat(q.arguments).containsExactly(-100456L, 3).inOrder()
     }
 
     @Test
