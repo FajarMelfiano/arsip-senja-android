@@ -1393,9 +1393,22 @@ class ArsipRepository(
                     DownloadWorker.K_FILE_ID to berkas.tdFileId,
                 ),
             )
+            // Menunggu jaringan: tanpa ini antrean langsung jalan saat perangkat
+            // offline, memakai salah satu dari percobaan ulang, lalu gagal
+            // padahal akan berhasil begitu jaringan kembali.
+            .setConstraints(DownloadWorker.BATAS_JARINGAN)
             .build()
-        workManager.enqueueUniqueWork("unduh-$berkasId", ExistingWorkPolicy.APPEND_OR_REPLACE, permintaan)
+        workManager.enqueueUniqueWork("unduh-$berkasId", ExistingWorkPolicy.KEEP, permintaan)
     }
+
+    /**
+     * Seluruh potongan milik satu kelompok, terurut indeks.
+     *
+     * Dipakai `DownloadWorker` untuk menyatu kembali berkas besar sebelum
+     * ditulis ke penyimpanan pengguna.
+     */
+    suspend fun ambilGrup(grupId: String): List<BerkasArsipEntity> =
+        berkasDao.ambilGrup(grupId)
 
     suspend fun tandaiLokal(berkasId: String, path: String?) {
         berkasDao.tandaiLokal(berkasId, path)

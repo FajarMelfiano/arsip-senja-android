@@ -91,31 +91,70 @@ object Notifikasi {
         if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
         NotificationManagerCompat.from(context).notify(
             id,
-            notifikasiTransfer(context, id, judul, isi, progresMaks, progresSekarang, selesai),
+            bangunTransfer(
+                context, id, judul, isi, progresMaks, progresSekarang, selesai,
+            ),
         )
     }
 
-    fun tampilkanUnggah(context: Context, nama: String, persen: Int, selesai: Boolean) =
-        tampilkan(
-            context,
-            ID_UNGGUH,
-            if (selesai) "Unggah selesai" else "Mengunggah…",
-            nama,
-            progresMaks = 100,
-            progresSekarang = persen,
-            selesai = selesai,
-        )
+    /**
+     * Bangun notifikasi transfer.
+     *
+     * Dipisah dari [tampilkan] karena `setForeground` memerlukan objek
+     * Notification, sedangkan notifikasi biasa di-*notify* lewat
+     * NotificationManager.
+     */
+    fun bangunTransfer(
+        context: Context,
+        id: Int,
+        judul: String,
+        isi: String,
+        progresMaks: Int = 0,
+        progresSekarang: Int = 0,
+        selesai: Boolean = false,
+    ): android.app.Notification =
+        notifikasiTransfer(context, id, judul, isi, progresMaks, progresSekarang, selesai)
 
-    fun tampilkanUnduh(context: Context, nama: String, persen: Int, selesai: Boolean) =
-        tampilkan(
-            context,
-            ID_UNDUH,
-            if (selesai) "Unduhan selesai" else "Mengunduh…",
-            nama,
-            progresMaks = 100,
-            progresSekarang = persen,
-            selesai = selesai,
-        )
+    /**
+ * Notifikasi unggah untuk satu berkas.
+ *
+ * [id] dibiarkan opsional agar setiap berkas punya notifikasi sendiri.
+ * Sebelumnya semua unggah berbagi satu id sehingga antrean berjalan saling
+ * menimpa, dan multipart yang selesai per-potongan ikut menutup notifikasi
+ * padahal potongan berikutnya masih berjalan.
+ */
+fun tampilkanUnggah(
+        context: Context,
+        nama: String,
+        persen: Int,
+        selesai: Boolean,
+        id: Int = ID_UNGGUH,
+    ) = tampilkan(
+        context,
+        id,
+        if (selesai) "Unggah selesai" else "Mengunggah…",
+        nama,
+        progresMaks = 100,
+        progresSekarang = persen,
+        selesai = selesai,
+    )
+
+/** Notifikasi unduhan untuk satu berkas; lihat [tampilkanUnggah] soal id. */
+fun tampilkanUnduh(
+        context: Context,
+        nama: String,
+        persen: Int,
+        selesai: Boolean,
+        id: Int = ID_UNDUH,
+    ) = tampilkan(
+        context,
+        id,
+        if (selesai) "Unduhan selesai" else "Mengunduh…",
+        nama,
+        progresMaks = 100,
+        progresSekarang = persen,
+        selesai = selesai,
+    )
 
     fun tampilkanSinkron(context: Context, pesan: String) {
         if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
