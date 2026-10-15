@@ -50,7 +50,7 @@ class AturanGabungTest {
 
     @Test
     fun `celah indeks melempar dengan nomor yang hilang`() {
-        val potongan = listOf(potongan(1), potongan(3))
+        val potongan = listOf(potongan(1, jumlah = 2), potongan(3, jumlah = 2))
 
         val galat = assertThrows(IllegalArgumentException::class.java) {
             AturanGabung.urutanDanHash(potongan)
@@ -70,7 +70,10 @@ class AturanGabungTest {
 
     @Test
     fun `hash tak konsisten melempar dengan kedua nilai`() {
-        val potongan = listOf(potongan(1, hash = "abc"), potongan(2, hash = "def"))
+        val potongan = listOf(
+            potongan(1, jumlah = 2, hash = "abc"),
+            potongan(2, jumlah = 2, hash = "def"),
+        )
 
         val galat = assertThrows(IllegalArgumentException::class.java) {
             AturanGabung.urutanDanHash(potongan)
