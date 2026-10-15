@@ -105,20 +105,21 @@ fun jumlahPotongan(ukuran: Long, batas: Long = BATAS_POTONGAN): Int {
  * menyimpan hanya satu potongan pada satu waktu.
  *
  * Nomor urut dimulai dari 1. [onPotongan] dipanggil dengan
- * `(berkas, indeks, jumlah)`. Bila [onPotongan] melempar galat, proses berhenti
- * dan potongan yang sedang ada dihapus.
+ * `(berkas, indeks, jumlah)` dan boleh `suspend` — pemanggil biasanya
+ * mengunggah setiap-potongan sebelum berikutnya dibuat. Bila [onPotongan]
+ * melempar galat, proses berhenti dan potongan yang sedang ada dihapus.
  *
  * @param hapusSetelah bila true, potongan dihapus setelah [onPotongan] selesai.
  * @throws java.io.IOException bila direktori tak bisa ditulis.
  */
 @JvmOverloads
-fun pecahBerturutan(
+suspend fun pecahBerturutan(
     sumber: File,
     direktori: File,
     batas: Long = BATAS_POTONGAN,
     buffer: Int = BUFFER_PEMECAH,
     hapusSetelah: Boolean = false,
-    onPotongan: (File, Int, Int) -> Unit,
+    onPotongan: suspend (File, Int, Int) -> Unit,
 ) {
     require(batas > 0) { "batas harus positif" }
     require(buffer > 0) { "buffer harus positif" }
@@ -165,8 +166,13 @@ fun pecahBerturutan(
 /** Nomor potongan yang tersimpan dalam nama berkas, atau null bila bukan potongan. */
 data class InfoPotongan(val indeks: Int, val jumlah: Int?)
 
-/** Pola `nama.part<angka><_opsional jumlah>.ekstensi`, maksimal 9 digit per angka. */
-private val POLA_POTONGAN = Regex(""".+\.part(\d{1,9})(\d{0,9})(?:\.[^.]*)?$""")
+/**
+ * Pola `nama.part<angka><_opsional jumlah>.ekstensi`, maksimal 9 digit per angka.
+ *
+ * Kelompok tangkapan: 1 = nama dasar, 2 = indeks, 3 = jumlah opsional,
+ * 4 = ekstensi termasuk titik (opsional).
+ */
+private val POLA_POTONGAN = Regex("""^(.+)\.part(\d{1,9})(\d{0,9})(\.[^.\s]*)?$""")
 
 /**
  * Baca nomor potongan dari nama berkas seperti `lapor.part3.pdf`.
@@ -180,11 +186,9 @@ private val POLA_POTONGAN = Regex(""".+\.part(\d{1,9})(\d{0,9})(?:\.[^.]*)?$""")
  */
 fun bacaInfoPotongan(namaBerkas: String): InfoPotongan? {
     val cocok = POLA_POTONGAN.matchEntire(namaBerkas) ?: return null
-    val indeks = cocok.groupValues[1].trimStart('0').ifEmpty { "0" }.toIntOrNull() ?: return null
+    val indeks = cocok.groupValues[2].toAngkaBersih() ?: return null
     if (indeks < 1) return null
-    val jumlah = cocok.groupValues[2]
-        .takeIf { it.isNotEmpty() }
-        ?.let { it.trimStart('0').ifEmpty { "0" }.toIntOrNull() }
+    val jumlah = cocok.groupValues[3].takeIf { it.isNotEmpty() }?.toAngkaBersih()
     return InfoPotongan(indeks, jumlah)
 }
 
@@ -198,11 +202,19 @@ fun bacaInfoPotongan(namaBerkas: String): InfoPotongan? {
  * @return nama asli, atau null bila [namaBerkas] bukan nama potongan.
  */
 fun namaAsliDariPotongan(namaBerkas: String): String? {
-    val info = bacaInfoPotongan(namaBerkas) ?: return null
-    val titik = namaBerkas.lastIndexOf('.')
-    val ekstensi = if (titik > 0) namaBerkas.substring(titik) else ""
-    return namaBerkas.substring(0, titik).removeSuffix(".part${info.indeks}") + ekstensi
+    val cocok = POLA_POTONGAN.matchEntire(namaBerkas) ?: return null
+    val indeks = cocok.groupValues[2].toAngkaBersih() ?: return null
+    if (indeks < 1) return null
+    return cocok.groupValues[1] + cocok.groupValues[4]
 }
+
+/** Uraikan angka tanpa kepekaan nol di depan; string kosong menjadi null. */
+private fun String.toAngkaBersih(): Int? {
+    if (isEmpty()) return null
+    val bersih = trimStart('0').ifEmpty { "0" }
+    return bersih.toIntOrNull()
+}
+
 
 /**
  * Urutkan nama berkas potongan secara **numerik** menurut nomor bagian.

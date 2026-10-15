@@ -2,18 +2,24 @@ package com.arsipsenja.data.work
 
 import android.content.Context
 import android.net.Uri
+import android.os.StatFs
 import android.util.Log
+import androidx.work.Constraints
 import androidx.work.CoroutineWorker
+import androidx.work.ForegroundInfo
+import androidx.work.NetworkType
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.arsipsenja.ArsipSenjaApp
 import com.arsipsenja.data.repo.PenjagaVault
 import com.arsipsenja.data.telegram.keBerkasMentah
 import com.arsipsenja.data.telegram.keEntity
+import com.arsipsenja.util.HashBerkas
+import com.arsipsenja.util.HeaderArsip
+import com.arsipsenja.util.susun
 import com.arsipsenja.util.TipeFile
 import java.io.File
 import java.io.FileOutputStream
-import java.io.RandomAccessFile
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.withTimeoutOrNull
@@ -81,46 +87,86 @@ class UploadWorker(
         val mime = applicationContext.contentResolver.getType(uri) ?: "*/*"
         val tipe = TipeFile.dariMime(mime, namaAsli)
 
+        // Notifikasi per berkas + foreground service. Tanpa foreground,
+        // WorkManager membatasi worker sekitar 10 menit sehingga unggahan besar
+        // terpotong dan seluruh pekerjaan diulang dari awal.
+        val idNotif = Notifikasi.idUnggahKhusus(uri.toString())
+        Notifikasi.tampilkanUnggah(applicationContext, namaAsli, 0, false, idNotif)
+        setForeground(
+            ForegroundInfo(
+                idNotif,
+                Notifikasi.bangunTransfer(
+                    applicationContext,
+                    idNotif,
+                    "Mengunggah…",
+                    namaAsli,
+                    100,
+                    0,
+                    false,
+                ),
+            ),
+        )
+
+        val ukuran = ukuranDari(uri)
         val berkasCache = salinKeCache(uri, namaAsli)
-            ?: return gagalDenganPesan("Gagal menyalin berkas — izin akses berkas mungkin sudah tidak berlaku. Pilih ulang berkasnya.")
+            ?: return gagalDenganPesan(
+                "Tidak bisa membaca berkas — izin akses mungkin sudah dicabut. Pilih ulang berkasnya.",
+            )
+
+        // Hash dihitung sekali dari berkas asli, lalu ikut di setiap header
+        // caption. Inilah yang membuat arsip dapat diverifikasi dan duplikat
+        // dapat dikenali.
+        val hashAsli = HashBerkas.hitungBerkas(berkasCache)
+        val grupId = if (hashAsli != null) grupIdDariHash(hashAsli) else java.util.UUID.randomUUID().toString()
         var gagal = false
         var pesanGagalTerakhir: String? = null
 
         try {
-            val potongan = pecahBilaBerlu(berkasCache)
+            ensureCukupRuang(berkasCache.length())
             var nomorKatalog = repo.jumlahBerkas(kunci)
 
-            for ((indeks, potonganFile) in potongan.withIndex()) {
-                val namaPotongan = if (potongan.size == 1) {
+            // Kirim satu berkas logis. Untuk berkas kecil ini satu kali; untuk
+            // berkas besar dipecah berurutan agar cache tidak pernah menyimpan
+            // seluruh potongan sekaligus.
+            val kirimPotongan: suspend (File, Int, Int) -> Unit =
+                suspendPotongan@{ potonganFile, indeks, total ->
+                val namaPotongan = if (total == 1) {
                     namaAsli
                 } else {
-                    com.arsipsenja.util.namaPotongan(namaAsli, indeks + 1)
-                }
-                // Guard idempoten: percobaan ulang setelah kiriman yang
-                // sebenarnya sudah sampai (mis. timeout tungguTerkirim yang
-                // kehilangan sinyal sukses) tidak boleh mengirim pesan baru —
-                // batch realtime sudah mengindeks kiriman pertama.
-                if (runAttemptCount > 0 && repo.sudahTerindeks(namaPotongan, potonganFile.length(), kunci.chatId)) {
-                    Log.i(tag, "Retry $runAttemptCount: $namaPotongan sudah terindeks — lewati kirim ulang.")
-                    continue
+                    com.arsipsenja.util.namaPotongan(namaAsli, indeks)
                 }
                 try {
+                    // Guard idempoten: percobaan ulang setelah kiriman yang
+                    // sebenarnya sudah sampai tidak boleh mengirim pesan baru.
+                    if (runAttemptCount > 0 &&
+                        repo.sudahTerindeks(namaPotongan, potonganFile.length(), kunci.chatId)
+                    ) {
+                        Log.i(tag, "Percobaan $runAttemptCount: $namaPotongan sudah terindeks — lewati.")
+                        return@suspendPotongan
+                    }
+
+                    val header = HeaderArsip.potongan(
+                        grupId = grupId,
+                        indeks = indeks,
+                        jumlah = total,
+                        namaAsli = namaAsli,
+                        ukuranTotal = ukuran,
+                        hashPotongan = HashBerkas.hitungBerkas(potonganFile),
+                    )
+                    val caption = header.susun()
+
                     val terkirim = telegram.kirimBerkas(
                         chatId = koleksi.chatId,
                         path = potonganFile.absolutePath,
                         tipe = tipe,
-                        caption = if (indeks == 0) "Unggah manual" else "",
+                        caption = caption,
                         topicId = koleksi.topicId,
                     )
 
-                    pantauProgresUnggah(
-                        telegram = telegram,
-                        pesan = terkirim,
-                        nama = namaPotongan,
-                    )
+                    pantauProgresUnggah(telegram, terkirim, namaPotongan, idNotif)
 
                     val dikonfirmasi = telegram.tungguTerkirim(terkirim.id)
-                    val mentah = dikonfirmasi.pesan.keBerkasMentah() ?: continue
+                    val mentah = dikonfirmasi.pesan.keBerkasMentah() ?: return@suspendPotongan
                     nomorKatalog += 1
                     val entri = mentah
                         .keEntity(
@@ -132,19 +178,23 @@ class UploadWorker(
                         .copy(tdLocalPath = null)
                     repo.simpanHasilUnggah(entri)
 
-                    Notifikasi.tampilkanUnggah(applicationContext, namaPotongan, 100, selesai = true)
+                    Notifikasi.tampilkanUnggah(
+                        applicationContext, namaPotongan, 100, total == 1, idNotif,
+                    )
                 } catch (e: Exception) {
                     Log.e(tag, "Gagal unggah potongan $namaPotongan", e)
-                    Notifikasi.tampilkanUnggah(applicationContext, namaPotongan, 0, selesai = true)
-                    // Simpan alasan gagalnya (galat forum diterjemahkan);
-                    // dipakai bila percobaan retry sudah habis.
-                    pesanGagalTerakhir =
-                        PenjagaVault.terjemahkanGalatForum(e.message ?: "Unggah gagal tanpa keterangan.")
+                    pesanGagalTerakhir = PenjagaVault.terjemahkanGalatForum(
+                        e.message ?: "Unggah gagal tanpa keterangan.",
+                    )
                     gagal = true
-                } finally {
-                    potonganFile.delete()
                 }
             }
+
+            pecahBerturut(berkasCache) { potongan, indeks, total ->
+                kirimPotongan(potongan, indeks, total)
+            }
+        } catch (e: SpaceHabisException) {
+            return gagalDenganPesan(e.message ?: "Ruang penyimpanan tidak cukup")
         } finally {
             berkasCache.delete()
         }
@@ -152,9 +202,24 @@ class UploadWorker(
         // Gagal per-potongan: beri kesempatan retry terbatas untuk galat
         // transien (jaringan), tapi pada percobaan terakhir kembalikan
         // FAILED dengan pesan — jangan gagal diam-diam tanpa alasan.
-        if (!gagal) return Result.success()
+        if (!gagal) {
+            Notifikasi.batalkan(applicationContext, idNotif)
+            return Result.success()
+        }
         if (percobaanKe < MAKS_PERCOBAAN_GAGAL) return Result.retry()
+        Notifikasi.batalkan(applicationContext, idNotif)
         return gagalDenganPesan(pesanGagalTerakhir ?: "Unggah gagal — coba lagi.")
+    }
+
+    /**
+     * Id kelompok yang stabil untuk isi yang sama.
+     *
+     * Berkas dengan hash sama diunggah ke dua koleksi berbeda akan memakai
+     * kelompok yang sama, sehingga penyatuan dan deteksi duplikat tetap bekerja.
+     */
+    private fun grupIdDariHash(hash: String): String {
+        val ringkas = hash.take(8).toLong(16).toString(16)
+        return "g${ringkas.padStart(16, '0')}"
     }
 
     /** Kegagalan terminal yang membawa pesan galat untuk ditampilkan UI. */
@@ -166,6 +231,7 @@ class UploadWorker(
         telegram: com.arsipsenja.data.telegram.TelegramClient,
         pesan: TdApi.Message,
         nama: String,
+        idNotif: Int,
     ) {
         val fileId = idFileDariPesan(pesan) ?: return
         var terakhir = -1
@@ -177,11 +243,16 @@ class UploadWorker(
                     val persen = p.persenUnggah
                     if (persen in 0..99 && persen != terakhir) {
                         terakhir = persen
-                        Notifikasi.tampilkanUnggah(applicationContext, nama, persen, selesai = false)
+                        Notifikasi.tampilkanUnggah(applicationContext, nama, persen, false, idNotif)
                     }
                 }
         }
-        Notifikasi.tampilkanUnggah(applicationContext, nama, 99, selesai = false)
+        // Jangan mengarang angka 99% bila progres sebenarnya belum sampai.
+        // Versi lama menulis 99% apa pun yang terjadi, sehingga UI menampilkan
+        // barra hampir penuh untuk potongan yang mungkin masih 10%.
+        if (terakhir == 99) {
+            Notifikasi.tampilkanUnggah(applicationContext, nama, 99, false, idNotif)
+        }
     }
 
     private fun salinKeCache(uri: Uri, nama: String): File? {
@@ -194,6 +265,12 @@ class UploadWorker(
                 }
             } ?: return null
             keluar
+        } catch (e: SecurityException) {
+            // Izin akses berkas dicabut. Kegagalan ini **tidak** bisa
+            // diperbaiki dengan mencoba lagi: pengguna harus memilih ulang
+            // berkasnya. Karena itu pesannya harus menyebut hal itu.
+            Log.e(tag, "Izin akses berkas dicabut untuk $nama", e)
+            null
         } catch (e: Exception) {
             Log.e(tag, "Salin berkas $nama gagal", e)
             null
@@ -201,8 +278,53 @@ class UploadWorker(
     }
 
     /**
-     * Pecah berkas besar memakai [com.arsipsenja.util.pecahBerkas]; sumber
-     * dihapus setelah dipecah agar cache tidak membengkak.
+     * Ruang bebas di `cacheDir`.
+     *
+     * Cache berada di penyimpanan internal, sehingga tidak bisa dipindah ke
+     * kartu SD seperti MediaStore. Untuk berkas besar inilah alasan pemecahan
+     * harus satu per satu: seluruhnya sekaligus bisa memakan belasan gigabyte.
+     */
+    private fun ruangCacheBebas(): Long =
+        StatFs(applicationContext.cacheDir.absolutePath).availableBytes
+
+    /** Throws [SpaceHabisException] bila ruang tidak cukup. */
+    private fun ensureCukupRuang(perlu: Long) {
+        if (perlu <= 0) return
+        // 20% cadangan untuk metadata filesystem.
+        val aman = (perlu * 1.2).toLong()
+        if (ruangCacheBebas() < aman) {
+            throw SpaceHabisException("Ruang penyimpanan tidak cukup")
+        }
+    }
+
+    /** Melempar galat bila ruang kosong tidak mencukupi. */
+    class SpaceHabisException(pesan: String) : Exception(pesan)
+
+    /** Ukuran berkas dari metadata SAF, atau 0 bila tidak diketahui. */
+    private fun ukuranDari(uri: Uri): Long = try {
+        applicationContext.contentResolver.query(uri, null, null, null, null)?.use { kursor ->
+            val indeks = kursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
+            if (indeks >= 0 && kursor.moveToFirst() && !kursor.isNull(indeks)) {
+                kursor.getLong(indeks)
+            } else {
+                0L
+            }
+        } ?: 0L
+    } catch (e: Exception) {
+        0L
+    }
+
+    /**
+     * Pecah berkas besar **satu per satu**.
+     *
+     * Versi lama memakai [com.arsipsenja.util.pecahBerkas] yang menulis seluruh
+     * potongan lebih dulu. Untuk berkas 6 GB itu berarti ~12 GB peak di cache
+     * (satu salinan asli ditambah seluruh potongan) sebelum sumber dihapus —
+     * dan tanpa ada pemeriksaan ruang, hasilnya `ENOSPC` di tengah jalan.
+     * Versi ini menyimpan paling banyak satu potongan pada satu waktu.
+     *
+     * Setiap potongan langsung diberi header caption berisi kelompok dan
+     * indeksnya, sehingga dapat disatukan kembali meski perangkat di-reset.
      */
     private fun pecahBilaBerlu(sumber: File): List<File> {
         if (!com.arsipsenja.util.perluPecah(sumber.length())) return listOf(sumber)
@@ -210,6 +332,25 @@ class UploadWorker(
         val hasil = com.arsipsenja.util.pecahBerkas(sumber, dir)
         sumber.delete()
         return hasil
+    }
+
+    /**
+     * Pecah satu per satu: satu potongan dibuat, dikirim, lalu dihapus
+     * sebelum potongan berikutnya dibuat.
+     *
+     * Hanya satu potongan yang ada di cache pada setiap saat, sehingga puncak
+     * penggunaan ruang untuk berkas 6 GB turun dari ~12 GB menjadi ~2 GB.
+     */
+    private suspend fun pecahBerturut(
+        sumber: File,
+        kirim: suspend (File, Int, Int) -> Unit,
+    ) {
+        com.arsipsenja.util.pecahBerturutan(
+            sumber = sumber,
+            direktori = File(applicationContext.cacheDir, "unggahan").apply { mkdirs() },
+            hapusSetelah = true,
+            onPotongan = { berkas, indeks, total -> kirim(berkas, indeks, total) },
+        )
     }
 
     private fun idFileDariPesan(pesan: TdApi.Message): Int? {
@@ -250,9 +391,11 @@ class UploadWorker(
         /** Batas retry untuk gagal per-potongan (runAttemptCount 0..1 → retry, ke-2 → FAILED berpesan). */
         private const val MAKS_PERCOBAAN_GAGAL = 2
 
-        /** 1,9 miliar byte — di bawah batas ~2 GiB unggah Telegram. */
-        private const val BATAS_POTONGAN = 1_900_000_000L
-        private const val BUFFER = 1 shl 20
         private const val BATAS_PROGRES = 120_000L
+
+        /** Constraint standar: hanya boleh jalan saat jaringan tersedia. */
+        val BATAS_JARINGAN: Constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)
+            .build()
     }
 }

@@ -1,5 +1,8 @@
 package com.arsipsenja.ui.screens
 
+import android.content.Context
+import android.content.Intent
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -30,6 +33,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.work.WorkInfo
 import com.arsipsenja.data.local.KoleksiEntity
@@ -70,10 +74,32 @@ fun UnggahScreen() {
 
     var bukaUntuk by remember { mutableStateOf<KoleksiEntity?>(null) }
 
+    // LocalContext hanya boleh dibaca langsung di dalam fungsi @Composable,
+    // bukan di dalam lambda pemicu activity result.
+    val konteks = LocalContext.current
     val pemilihBerkas = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments(),
     ) { hasil ->
-        if (hasil.isNotEmpty()) vm.mulaiUnggah(hasil)
+        if (hasil.isEmpty()) return@rememberLauncherForActivityResult
+        // Simpan izin akses secara permanen.
+        //
+        // Tanpa ini, izin hanya berlaku selama activity file-picker hidup.
+        // Antrean WorkManager bisa berjalan jauh setelah itu — atau setelah
+        // proses mati — sehingga reading berkas gagal dengan SecurityException
+        // dan tidak ada yang bisa memperbaikinya selain pengguna memilih ulang
+        // berkasnya. Karena aplikasi ini memang dipakai untuk memindahkan berkas besar,
+        // ini adalah penyebab kegagalan paling merusak.
+        hasil.forEach { uri ->
+            runCatching {
+                konteks.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }.onFailure {
+                Log.w("UnggahScreen", "Izin persisten gagal untuk $uri: ${it.message}")
+            }
+        }
+        vm.mulaiUnggah(hasil)
     }
 
     // Koleksi tujuan manual + status kuncinya (diingat mengikuti daftar).

@@ -1288,6 +1288,10 @@ class ArsipRepository(
                         UploadWorker.K_TOPIK to kunciFinal.topicId,
                     ),
                 )
+                // Menunggu jaringan: tanpa ini antrean langsung jalan saat
+                // perangkat offline, memakai salah satu dari dua percobaan
+                // ulang, lalu gagal padahal akan berhasil begitu jaringan kembali.
+                .setConstraints(UploadWorker.BATAS_JARINGAN)
                 .addTag(pekerjaan)
                 .addTag(TAG_UNGGAH)
                 .build()
