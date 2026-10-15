@@ -148,6 +148,15 @@ dependencies {
     testImplementation(libs.androidx.room.testing)
     testImplementation(libs.androidx.work.testing)
 
+    // Uji instrumented: memverifikasi mekanisme pada runtime Android sungguhan.
+    // Nilai ForegroundInfo dan ServiceInfo hanya bisa dipercaya di device.
+    androidTestImplementation(libs.androidx.test.junit)
+    // Runner sendiri tidak ikut lewat androidx.test.ext:junit; tanpa ini kelas
+    // AndroidJUnitRunner tidak ada di APK test dan instrumentasi gagal start.
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.core.ktx)
+    androidTestImplementation(libs.truth)
+
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 }
