@@ -233,6 +233,9 @@ class UploadWorker(
         /** Id topik forum tujuan; 0 = channel lama / tanpa topik. */
         const val K_TOPIK = "topicId"
 
+        /** Nama tampil berkas (DISPLAY_NAME SAF); dibaca UI antrean. */
+        const val K_NAMA = "namaBerkas"
+
         /** Batas retry untuk gagal per-potongan (runAttemptCount 0..1 → retry, ke-2 → FAILED berpesan). */
         private const val MAKS_PERCOBAAN_GAGAL = 2
 

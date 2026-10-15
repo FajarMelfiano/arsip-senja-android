@@ -127,7 +127,10 @@ class UnggahViewModel(
         val alasan = info.outputData.getString(UploadWorker.K_PESAN_GALAT)
             ?.takeIf { it.isNotBlank() }
             ?: "Unggah gagal."
-        return if (alasan == "Unggah gagal.") alasan else "Unggahan gagal: $alasan"
+        val nama = info.inputData.getString(UploadWorker.K_NAMA)
+            ?.takeIf { it.isNotBlank() }
+        val inti = if (alasan == "Unggah gagal.") alasan else "Unggahan gagal: $alasan"
+        return if (nama != null) "$nama — $inti" else inti
     }
 
     fun pilihKoleksi(kunci: KunciKoleksi?) {

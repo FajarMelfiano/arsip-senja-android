@@ -1174,6 +1174,7 @@ class ArsipRepository(
                 .setInputData(
                     workDataOf(
                         UploadWorker.K_URI to uri.toString(),
+                        UploadWorker.K_NAMA to namaBerkasUri(uri),
                         UploadWorker.K_KOLEKSI to kunciFinal.chatId,
                         UploadWorker.K_TOPIK to kunciFinal.topicId,
                     ),
@@ -1244,9 +1245,20 @@ class ArsipRepository(
             .minByOrNull { it.tipeDitangani.size }
             ?: daftar.first()
 
+    /** Nama tampil berkas SAF (DISPLAY_NAME), fallback ke segmen path terakhir. */
+    private fun namaBerkasUri(uri: Uri): String =
+        context.contentResolver.query(
+            uri,
+            arrayOf(OpenableColumns.DISPLAY_NAME),
+            null,
+            null,
+            null,
+        )?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+            ?.takeIf { it.isNotBlank() }
+            ?: uri.lastPathSegment.orEmpty().ifBlank { "berkas" }
+
     /** Deteksi tipe berkas dari MIME + nama berkas SAF. */
-    private fun deteksiTipe(uri: Uri): TipeFile {
-        val resolver = context.contentResolver
+    private fun deteksiTipe(uri: Uri): TipeFile {        val resolver = context.contentResolver
         val mime = resolver.getType(uri)
         val nama = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
             if (c.moveToFirst()) c.getString(0) else null

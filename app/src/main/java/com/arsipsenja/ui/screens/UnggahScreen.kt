@@ -350,10 +350,15 @@ private fun BarisAntrean(info: WorkInfo, onBatalkan: () -> Unit) {
         )
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
+            val namaBerkas = info.inputData.getString(UploadWorker.K_NAMA)
+                ?.takeIf { it.isNotBlank() }
+                ?: "Pekerjaan ${info.id.toString().take(8)}"
             Text(
-                text = label,
+                text = namaBerkas,
                 style = MaterialTheme.typography.titleSmall,
                 color = WarnaArsip.Tinta,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
             )
             Text(
                 // Bila gagal, tampilkan alasan asli dari worker (bila ada)
@@ -361,9 +366,9 @@ private fun BarisAntrean(info: WorkInfo, onBatalkan: () -> Unit) {
                 text = if (info.state == WorkInfo.State.FAILED) {
                     info.outputData.getString(UploadWorker.K_PESAN_GALAT)
                         ?.takeIf { it.isNotBlank() }
-                        ?: "Pekerjaan ${info.id.toString().take(8)}"
+                        ?: label
                 } else {
-                    "Pekerjaan ${info.id.toString().take(8)}"
+                    label
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = WarnaArsip.Tinta3,
