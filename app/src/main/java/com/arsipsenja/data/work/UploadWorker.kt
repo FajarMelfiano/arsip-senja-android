@@ -47,6 +47,21 @@ class UploadWorker(
      */
     override suspend fun doWork(): Result {
         return try {
+            // Periksa status jeda dari database sebelum memulai pekerjaan.
+            val workId = inputData.getString(K_WORK_ID)
+            if (workId.isNullOrBlank()) {
+                return gagalDenganPesan("ID pekerjaan tidak valid")
+            }
+            val repo = (applicationContext as ArsipSenjaApp).wadah.arsipRepository
+            // Status jeda dibaca dari Room: persisten melewati tutup aplikasi
+            // maupun reboot. Selama dijeda, worker keluar via Result.retry() —
+            // WorkManager menjadwalkannya ulang dengan backoff, dan unggahan
+            // TIDAK berjalan sampai pengguna menekan "lanjutkan".
+            if (repo.sedangJeda(workId)) {
+                setOutputData(workDataOf(K_PAUSED to "true"))
+                return Result.retry()
+            }
+            setOutputData(workDataOf(K_PAUSED to "false"))
             kerjakan()
         } catch (e: kotlinx.coroutines.CancellationException) {
             // Pembatalan harus diteruskan apa adanya, bukan jadi FAILED.
@@ -366,8 +381,14 @@ class UploadWorker(
         const val K_URI = "uri"
         const val K_KOLEKSI = "koleksiId"
 
+        /** UUID pekerjaan unggah; kunci baris status jeda di Room. */
+        const val K_WORK_ID = "workId"
+
         /** Kunci outputData untuk pesan galat terminal (dibaca UI antrean). */
         const val K_PESAN_GALAT = "pesanGalat"
+
+        /** Kunci outputData untuk status jeda ("true"/"false"; dibaca UI antrean). */
+        const val K_PAUSED = "paused"
 
         /** Id topik forum tujuan; 0 = channel lama / tanpa topik. */
         const val K_TOPIK = "topicId"
@@ -380,9 +401,17 @@ class UploadWorker(
 
         private const val BATAS_PROGRES = 120_000L
 
-        /** Constraint standar: hanya boleh jalan saat jaringan tersedia. */
-        val BATAS_JARINGAN: Constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
-            .build()
+        /**
+         * Constraint jaringan untuk pekerjaan unggah.
+         * - hanyaWifi = false → jalan di semua koneksi (seluler pun boleh).
+         * - hanyaWifi = true  → hanya jaringan tak-bermeter (Wi-Fi), transfer
+         *   ditahan WorkManager selama perangkat di jaringan seluler.
+         */
+        fun batasJaringan(hanyaWifi: Boolean): Constraints =
+            Constraints.Builder()
+                .setRequiredNetworkType(
+                    if (hanyaWifi) NetworkType.UNMETERED else NetworkType.CONNECTED,
+                )
+                .build()
     }
 }

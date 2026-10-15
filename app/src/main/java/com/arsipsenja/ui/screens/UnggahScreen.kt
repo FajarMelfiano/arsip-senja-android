@@ -65,8 +65,10 @@ fun UnggahScreen() {
     val koleksi by vm.koleksi.collectAsState()
     val terpilih by vm.koleksiTerpilih.collectAsState()
     val ruteOtomatis by vm.ruteOtomatis.collectAsState()
+    val hanyaWifi by vm.hanyaWifi.collectAsState()
     val namaTerpilih by vm.namaKoleksiTerpilih.collectAsState()
     val antrean by vm.antrean.collectAsState()
+    val prioritasUnggah by vm.prioritasUnggah.collectAsState()
     val transfer by vm.transfer.collectAsState()
     val pesan by vm.pesan.collectAsState()
     val galatUnggah by vm.galatUnggah.collectAsState()
@@ -166,6 +168,34 @@ fun UnggahScreen() {
                 androidx.compose.material3.Switch(
                     checked = ruteOtomatis,
                     onCheckedChange = vm::setRuteOtomatis,
+                    colors = androidx.compose.material3.SwitchDefaults.colors(
+                        checkedThumbColor = WarnaArsip.Amber,
+                        checkedTrackColor = WarnaArsip.AmberRedup,
+                    ),
+                )
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = "Hanya unggah via Wi-Fi",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = WarnaArsip.Tinta,
+                    )
+                    Text(
+                        text = "Tahan unggahan saat memakai data seluler",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = WarnaArsip.Tinta3,
+                    )
+                }
+                androidx.compose.material3.Switch(
+                    checked = hanyaWifi,
+                    onCheckedChange = vm::setHanyaWifi,
                     colors = androidx.compose.material3.SwitchDefaults.colors(
                         checkedThumbColor = WarnaArsip.Amber,
                         checkedTrackColor = WarnaArsip.AmberRedup,
@@ -302,7 +332,16 @@ fun UnggahScreen() {
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp),
             ) {
                 items(antrean, key = { it.id }) { info ->
-                    BarisAntrean(info, onBatalkan = { vm.batalkan(info.id) })
+                    val workId = vm.workIdDariInfo(info)
+                    BarisAntrean(
+                        info = info,
+                        vm = vm,
+                        prioritas = workId != null && workId in prioritasUnggah,
+                        onTandaiPrioritas = { p ->
+                            if (workId != null) vm.tandaiPrioritas(workId, p)
+                        },
+                        onBatalkan = { vm.batalkan(info.id) },
+                    )
                 }
             }
         } else if (transfer.isEmpty()) {
@@ -346,7 +385,13 @@ fun UnggahScreen() {
 }
 
 @Composable
-private fun BarisAntrean(info: WorkInfo, onBatalkan: () -> Unit) {
+private fun BarisAntrean(
+    info: WorkInfo,
+    vm: UnggahViewModel,
+    prioritas: Boolean,
+    onTandaiPrioritas: (Boolean) -> Unit,
+    onBatalkan: () -> Unit,
+) {
     val (label, warna) = when (info.state) {
         WorkInfo.State.ENQUEUED -> "Antre" to WarnaArsip.Tinta2
         WorkInfo.State.RUNNING -> "Berjalan" to WarnaArsip.Amber
@@ -401,12 +446,35 @@ private fun BarisAntrean(info: WorkInfo, onBatalkan: () -> Unit) {
             )
         }
         if (info.state == WorkInfo.State.ENQUEUED || info.state == WorkInfo.State.RUNNING) {
-            com.arsipsenja.ui.components.TombolIkon(
-                ikon = ArsipIcons.X,
-                aksi = "Batalkan unggah",
-                tint = WarnaArsip.Bahaya,
-                onClick = onBatalkan,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val workId = vm.workIdDariInfo(info)
+                com.arsipsenja.ui.components.TombolIkon(
+                    ikon = ArsipIcons.Bookmark,
+                    aksi = if (prioritas) "Hapus tanda prioritas" else "Tandai prioritas",
+                    tint = if (prioritas) WarnaArsip.Amber else WarnaArsip.Tinta3,
+                    onClick = { onTandaiPrioritas(!prioritas) },
+                )
+                Spacer(Modifier.width(8.dp))
+                if (workId != null) {
+                    val dijeda by vm.statusJeda(workId).collectAsState(initial = false)
+                    com.arsipsenja.ui.components.TombolIkon(
+                        ikon = if (dijeda) ArsipIcons.Play else ArsipIcons.Pause,
+                        aksi = if (dijeda) "Lanjutkan unggah" else "Jeda unggah",
+                        tint = WarnaArsip.Tinta,
+                        onClick = {
+                            if (dijeda) vm.lanjutkanUnggah(workId)
+                            else vm.jedaUnggah(workId)
+                        },
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
+                com.arsipsenja.ui.components.TombolIkon(
+                    ikon = ArsipIcons.X,
+                    aksi = "Batalkan unggah",
+                    tint = WarnaArsip.Bahaya,
+                    onClick = onBatalkan,
+                )
+            }
         }
     }
 }

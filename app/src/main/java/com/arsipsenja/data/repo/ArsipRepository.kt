@@ -44,6 +44,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -69,6 +70,7 @@ class ArsipRepository(
 
     private val tag = "ArsipRepository"
     private val berkasDao = db.berkasDao()
+    private val pauseDao = db.pauseDao
     private val koleksiDao = db.koleksiDao()
     private val tautanDao = db.tautanDao()
 
@@ -1278,26 +1280,63 @@ class ArsipRepository(
      */
     suspend fun mulaiUnggah(uris: List<Uri>, kunci: KunciKoleksi) {
         val kunciFinal = if (kunci.adalahTopik) pastikanTopikKoleksi(kunci) else kunci
+        val hanyaWifi = pengaturan.hanyaWifi.first()
         uris.forEach { uri ->
-            val pekerjaan = "unggah-${UUID.randomUUID()}"
+            val workId = UUID.randomUUID().toString()
+            val pekerjaan = "unggah-$workId"
+            // Sisipkan status jeda awal (tidak jeda, prioritas normal) ke database.
+            pauseDao.upsert(
+                UploadQueuePauseEntity(
+                    workId = workId,
+                    isPaused = 0,
+                    priority = 0
+                )
+            )
             val permintaan = OneTimeWorkRequestBuilder<UploadWorker>()
                 .setInputData(
                     workDataOf(
                         UploadWorker.K_URI to uri.toString(),
                         UploadWorker.K_KOLEKSI to kunciFinal.chatId,
                         UploadWorker.K_TOPIK to kunciFinal.topicId,
+                        UploadWorker.K_WORK_ID to workId,
                     ),
                 )
                 // Menunggu jaringan: tanpa ini antrean langsung jalan saat
                 // perangkat offline, memakai salah satu dari dua percobaan
                 // ulang, lalu gagal padahal akan berhasil begitu jaringan kembali.
-                .setConstraints(UploadWorker.BATAS_JARINGAN)
+                .setConstraints(UploadWorker.batasJaringan(hanyaWifi))
                 .addTag(pekerjaan)
                 .addTag(TAG_UNGGAH)
                 .build()
             workManager.enqueueUniqueWork(pekerjaan, ExistingWorkPolicy.APPEND_OR_REPLACE, permintaan)
         }
     }
+
+    /**
+     * Mengatur status jeda pekerjaan unggah. Disimpan di Room sehingga
+     * persisten melewati tutup aplikasi maupun reboot perangkat.
+     */
+    suspend fun setJedaUnggah(workId: String, jeda: Boolean) {
+        val entitas = pauseDao.getPauseStatus(workId) ?: return
+        pauseDao.updatePauseStatus(entitas.copy(isPaused = if (jeda) 1 else 0))
+    }
+
+    /** Mengamati status jeda pekerjaan unggah; false bila belum pernah dicatat. */
+    fun amatiJedaUnggah(workId: String): Flow<Boolean> =
+        pauseDao.amatiJeda(workId).map { it == 1 }
+
+    /** Dibaca UploadWorker di awal doWork: apakah pekerjaan ini sedang dijeda. */
+    suspend fun sedangJeda(workId: String): Boolean =
+        pauseDao.getPauseStatus(workId)?.isPaused == 1
+
+    /** Tandai/hapus tanda prioritas satu pekerjaan unggah. */
+    suspend fun setPrioritasUnggah(workId: String, prioritas: Boolean) {
+        val entitas = pauseDao.getPauseStatus(workId) ?: return
+        pauseDao.updatePauseStatus(entitas.copy(priority = if (prioritas) 1 else 0))
+    }
+
+    /** Mengamati daftar workId bertanda prioritas (untuk urutan antrean). */
+    fun amatiPrioritasUnggah(): Flow<List<String>> = pauseDao.amatiPrioritas()
 
     /**
      * Antrekan unggah dengan rute otomatis: tiap berkas dideteksi tipenya,
