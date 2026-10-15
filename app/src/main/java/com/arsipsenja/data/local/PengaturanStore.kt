@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
@@ -113,6 +114,28 @@ class PengaturanStore(private val context: Context) {
         store.edit { it[KUNCI_SINKRON_TERAKHIR] = ms }
     }
 
+    // ---- Galat unggah yang sudah dilaporkan ----
+
+    /**
+     * ID pekerjaan unggah yang popup galatnya sudah pernah ditampilkan.
+     * Disimpan persisten agar galat lama tidak dibuka ulang setiap layar
+     * Unggah dibuka (ViewModel tab bisa dibuat ulang saat navigasi).
+     */
+    val aliranGagalDilaporkan: Flow<Set<String>> =
+        store.data.map { p -> p[KUNCI_GAGAL_DILAPORKAN] ?: emptySet() }
+
+    suspend fun tandaiGagalDilaporkan(id: String) {
+        store.edit { p ->
+            val semua = (p[KUNCI_GAGAL_DILAPORKAN] ?: emptySet()) + id
+            // Batasi agar tidak tumbuh tanpa batas (cukup 200 terakhir).
+            p[KUNCI_GAGAL_DILAPORKAN] = if (semua.size > 200) {
+                semua.takeLast(200).toSet()
+            } else {
+                semua
+            }
+        }
+    }
+
     // ---- Rahasia Telegram ----
 
     fun apiId(): Int? = amanah.getString(KUNCI_API_ID, null)?.toIntOrNull()
@@ -156,6 +179,7 @@ class PengaturanStore(private val context: Context) {
         val KUNCI_BIOMETRIK = booleanPreferencesKey("biometrik_aktif")
         val KUNCI_VAULT = longPreferencesKey("vault_chat_id")
         val KUNCI_SINKRON_TERAKHIR = longPreferencesKey("sinkron_terakhir")
+        val KUNCI_GAGAL_DILAPORKAN = stringSetPreferencesKey("notifikasi_gagal_unggah")
         const val KUNCI_API_ID = "telegram_api_id"
         const val KUNCI_API_HASH = "telegram_api_hash"
         const val KUNCI_DB = "kunci_db_tdlib"

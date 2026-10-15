@@ -6,6 +6,7 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import com.arsipsenja.data.local.KoleksiEntity
 import com.arsipsenja.data.local.KunciKoleksi
+import com.arsipsenja.data.local.PengaturanStore
 import com.arsipsenja.data.repo.ArsipRepository
 import com.arsipsenja.data.telegram.ProgresBerkas
 import com.arsipsenja.data.telegram.TelegramClient
@@ -15,6 +16,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -29,6 +31,7 @@ class UnggahViewModel(
     private val repo: ArsipRepository,
     private val workManager: WorkManager,
     private val telegram: TelegramClient,
+    private val pengaturan: PengaturanStore,
 ) : ViewModel() {
 
     /** Koleksi tujuan: hanya pribadi — koleksi impor tidak menerima unggahan. */
@@ -47,14 +50,22 @@ class UnggahViewModel(
 
     /**
      * Popup galat untuk pekerjaan yang FAILED terminal — sekali per
-     * pekerjaan per masa hidup ViewModel. Alasan dari outputData
-     * [UploadWorker], BUKAN per percobaan retry. Teks per baris antrean
-     * tetap tampil; popup ini yang membuat kegagalan "kelihatan".
+     * pekerjaan, persisten antar buka layar (disimpan di DataStore).
+     * Alasan dari outputData [UploadWorker], BUKAN per percobaan retry.
+     * Teks per baris antrean tetap tampil; popup ini yang membuat
+     * kegagalan "kelihatan".
      */
     private val _galatUnggah = MutableStateFlow<PesanStatus?>(null)
     val galatUnggah: StateFlow<PesanStatus?> = _galatUnggah.asStateFlow()
 
     private val gagalDilaporkan = mutableSetOf<UUID>()
+
+    /** Tandai dilaporkan: di memori + persisten agar tak dibuka ulang. */
+    private fun tandaiDilaporkan(id: UUID) {
+        if (gagalDilaporkan.add(id)) {
+            viewModelScope.launch { pengaturan.tandaiGagalDilaporkan(id.toString()) }
+        }
+    }
 
     /** Antrean pekerjaan unggah (baru → lama), termasuk yang sudah selesai. */
     val antrean: StateFlow<List<WorkInfo>> =
@@ -89,20 +100,34 @@ class UnggahViewModel(
             }
         }
         viewModelScope.launch {
+            // Muat dulu ID galat yang sudah dilaporkan agar galat lama
+            // tidak dibuka ulang setiap layar Unggah dibuka.
+            pengaturan.aliranGagalDilaporkan.first().forEach { teks ->
+                runCatching { gagalDilaporkan.add(UUID.fromString(teks)) }
+            }
             antrean.collect { daftar ->
                 if (_galatUnggah.value != null) return@collect
                 val gagal = daftar.firstOrNull {
                     it.state == WorkInfo.State.FAILED && it.id !in gagalDilaporkan
                 } ?: return@collect
-                gagalDilaporkan.add(gagal.id)
-                val alasan = gagal.outputData.getString(UploadWorker.K_PESAN_GALAT)
-                    ?: "Unggah gagal."
+                tandaiDilaporkan(gagal.id)
                 _galatUnggah.value = PesanStatus(
                     NadaStatus.GALAT,
-                    "Unggahan gagal: $alasan",
+                    teksGalatUnggah(gagal),
                 )
             }
         }
+    }
+
+    /**
+     * Teks popup galat: alasan asli worker bila informatif, tanpa
+     * pengulangan "gagal … gagal".
+     */
+    private fun teksGalatUnggah(info: WorkInfo): String {
+        val alasan = info.outputData.getString(UploadWorker.K_PESAN_GALAT)
+            ?.takeIf { it.isNotBlank() }
+            ?: "Unggah gagal."
+        return if (alasan == "Unggah gagal.") alasan else "Unggahan gagal: $alasan"
     }
 
     fun pilihKoleksi(kunci: KunciKoleksi?) {
@@ -213,6 +238,20 @@ class UnggahViewModel(
         )
     }
 
+    /**
+     * Bersihkan riwayat antrean: hapus semua pekerjaan yang sudah selesai
+     * (selesai/gagal/dibatalkan) dari daftar. Pekerjaan yang sedang
+     * berjalan tidak ikut terhapus.
+     */
+    fun bersihkanRiwayat() {
+        workManager.pruneWork()
+        _transfer.value = emptyMap()
+        _pesan.value = PesanStatus(
+            NadaStatus.INFO,
+            "Riwayat antrean dibersihkan.",
+        )
+    }
+
     fun habiskanPesan() {
         _pesan.value = null
     }
@@ -226,12 +265,10 @@ class UnggahViewModel(
         val berikut = antrean.value.firstOrNull {
             it.state == WorkInfo.State.FAILED && it.id !in gagalDilaporkan
         } ?: return
-        gagalDilaporkan.add(berikut.id)
-        val alasan = berikut.outputData.getString(UploadWorker.K_PESAN_GALAT)
-            ?: "Unggah gagal."
+        tandaiDilaporkan(berikut.id)
         _galatUnggah.value = PesanStatus(
             NadaStatus.GALAT,
-            "Unggahan gagal: $alasan",
+            teksGalatUnggah(berikut),
         )
     }
 
@@ -247,6 +284,7 @@ class UnggahViewModel(
                 repo = wadah.arsipRepository,
                 workManager = wadah.workManager,
                 telegram = wadah.telegramClient,
+                pengaturan = wadah.pengaturan,
             )
         }
     }

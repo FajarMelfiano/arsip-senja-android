@@ -224,6 +224,14 @@ fun UnggahScreen() {
                 warnaTinta = WarnaArsip.Bahaya,
             )
 
+            Spacer(Modifier.height(10.dp))
+
+            TombolCadangan(
+                teks = "Bersihkan riwayat antrean",
+                ikon = ArsipIcons.Trash2,
+                onClick = vm::bersihkanRiwayat,
+            )
+
             if (namaTerpilih != null) {
                 Spacer(Modifier.height(8.dp))
                 Text(
