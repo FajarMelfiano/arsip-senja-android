@@ -15,6 +15,7 @@ import com.arsipsenja.ArsipSenjaApp
 import com.arsipsenja.data.local.BerkasArsipEntity
 import com.arsipsenja.data.repo.ArsipRepository
 import com.arsipsenja.data.telegram.TelegramException
+import com.arsipsenja.util.AturanGabung
 import com.arsipsenja.util.GabungPotongan
 import com.arsipsenja.util.HashBerkas
 import com.arsipsenja.util.KebijakanCobaLagi
@@ -109,8 +110,12 @@ class DownloadWorker(
             batalkanNotif(idNotif)
             gagal(
                 "Ukuran hasil unduhan tidak sesuai arsip " +
-                    "(diharapkan ${e.diharapkan}, diterima ${e.sebenarnya})",
+                "(diharapkan ${e.diharapkan}, diterima ${e.sebenarnya})",
             )
+        } catch (e: IllegalArgumentException) {
+            // Kesalahan logika murni: urutan, kelengkapan, atau hash tidak konsisten.
+            batalkanNotif(idNotif)
+            gagal("Potongan berkas tidak valid: ${e.message}")
         } catch (e: TelegramException) {
             putuskan(e, idNotif)
         } catch (e: Exception) {
@@ -140,15 +145,16 @@ class DownloadWorker(
         idNotif: Int,
     ): String? {
         val grupId = berkas.grupId ?: return null
-        val potongan = repo.ambilGrup(grupId).sortedBy { it.indeksPotongan }
+        val potongan = repo.ambilGrup(grupId)
         if (potongan.isEmpty()) return null
 
-        // Periksa celah lebih dulu, sebelum mengunduh apa pun.
-        GabungPotongan.periksaKelengkapan(potongan.map { it.nama })
+        // Verifikasi urutan, kelengkapan, dan konsistensi hash menggunakan logika murni.
+        // Jika hash tidak konsisten antara potongan, fungsi ini akan melempar pengecualian.
+        val terurut = AturanGabung.urutanDanHash(potongan).first
 
         val lokal = LinkedHashMap<String, File>()
         try {
-            for (p in potongan) {
+            for (p in terurut) {
                 pantauProgresUnduh(p.tdFileId, p.namaTampil, idNotif)
                 val path = repo.telegram.unduh(p.tdFileId).local?.path
                     ?: throw IOException("Potongan ${p.namaTampil} gagal diunduh")

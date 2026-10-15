@@ -95,6 +95,30 @@ object ArsipIcons {
         }
     }
 
+    val Play: ImageVector by lazy {
+        arsipIcon("play") {
+            moveTo(6, 3)
+            lineTo(20, 12)
+            lineTo(6, 21)
+            close()
+        }
+    }
+
+    val Pause: ImageVector by lazy {
+        arsipIcon("pause") {
+            moveTo(14, 4)
+            lineTo(18, 4)
+            lineTo(18, 20)
+            lineTo(14, 20)
+            close()
+            moveTo(6, 4)
+            lineTo(10, 4)
+            lineTo(10, 20)
+            lineTo(6, 20)
+            close()
+        }
+    }
+
     val Plus: ImageVector by lazy {
         arsipIcon("plus") {
             moveTo(5, 12)

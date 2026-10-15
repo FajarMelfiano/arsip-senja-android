@@ -44,6 +44,7 @@ import com.arsipsenja.data.local.KunciBaru
 import com.arsipsenja.data.local.KunciKoleksi
 import com.arsipsenja.data.local.KunciRahasia
 import com.arsipsenja.data.local.TipeKunci
+import com.arsipsenja.util.AturanSenjaMemories
 import com.arsipsenja.util.TipeFile
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -52,6 +53,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -77,6 +79,7 @@ import com.arsipsenja.ui.components.TombolUtama
 import com.arsipsenja.ui.components.formatJam
 import com.arsipsenja.ui.components.perangkatDukungBiometrik
 import com.arsipsenja.ui.icons.ArsipIcons
+import java.util.TimeZone
 import com.arsipsenja.ui.theme.Fraunces
 import com.arsipsenja.ui.theme.WarnaArsip
 import com.arsipsenja.ui.viewmodel.DasborViewModel
@@ -141,7 +144,17 @@ fun DasborScreen(onBukaBerkas: (String) -> Unit, onBukaImpor: () -> Unit = {}) {
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp),
-    ) {
+     ) {
+        // Senja Memories: kenangan "pada hari ini" — bisa ditutup, tak tampil lagi hari ini.
+        val kenangan by vm.memories.collectAsState()
+        val kenanganDitutup by vm.senjaMemoriesDismissed.collectAsState()
+        if (!kenanganDitutup && kenangan.isNotEmpty()) {
+            SenjaMemoriesCard(
+                memories = kenangan,
+                onDismiss = { vm.setSenjaMemoriesDismissed() },
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+        }
         KepalaDasbor(
             jumlahBerkas = statistik.jumlah,
             tampilan = tampilan,
@@ -1305,7 +1318,7 @@ private fun DialogUbahKoleksi(
     )
 }
 
-/** Delapan preset warna kategori; 0 = warna bawaan tema. */
+    /** Delapan preset warna kategori; 0 = warna bawaan tema. */
 private val WarnaKategori = listOf(
     0xFFE8A33D.toInt(),
     0xFFA48AE0.toInt(),
@@ -1393,4 +1406,77 @@ private fun ringkasanTipe(koleksi: KoleksiEntity): String {
     val semua = TipeFile.entries.toSet()
     return if (koleksi.tipeDitangani == semua) "Semua tipe"
     else koleksi.tipeDitangani.sortedBy { it.ordinal }.joinToString(", ") { it.label }
+}
+
+/**
+ * Kartu "Kenangan Senja": kolase kecil foto/video yang tanggalnya (hari dan bulan)
+ * sama dengan hari ini, tetapi dari tahun-tahun sebelumnya. Bisa ditutup; status
+ * tutup disimpan per tanggal sehingga kartu tidak tampil lagi di hari yang sama.
+ */
+@Composable
+private fun SenjaMemoriesCard(
+    memories: List<BerkasArsipEntity>,
+    onDismiss: () -> Unit,
+) {
+    val tanggalHariIni = AturanSenjaMemories.formatTanggalHariIni(TimeZone.getDefault())
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(WarnaArsip.Permukaan, RoundedCornerShape(12.dp))
+            .padding(16.dp),
+    ) {
+        Text(
+            text = "Kenangan Senja",
+            style = MaterialTheme.typography.titleMedium,
+            color = WarnaArsip.Tinta,
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "$tanggalHariIni, tahun-tahun lalu",
+            style = MaterialTheme.typography.bodySmall,
+            color = WarnaArsip.Tinta2,
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            memories.forEach { berkas ->
+                Column(
+                    modifier = Modifier.weight(1f),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Icon(
+                        imageVector =
+                            if (berkas.tipe == TipeFile.VIDEO.name) ArsipIcons.Film
+                            else ArsipIcons.Image,
+                        contentDescription = null,
+                        tint = WarnaArsip.Amber,
+                        modifier = Modifier.size(28.dp),
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = berkas.namaTampil.takeIf { it.isNotBlank() } ?: "berkas",
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = WarnaArsip.Tinta2,
+                    )
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+        ) {
+            TextButton(onClick = onDismiss) {
+                Text(
+                    text = "Tutup untuk hari ini",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = WarnaArsip.Tinta2,
+                )
+            }
+        }
+    }
 }

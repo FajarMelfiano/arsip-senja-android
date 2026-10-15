@@ -12,6 +12,7 @@ import com.arsipsenja.data.telegram.ProgresBerkas
 import com.arsipsenja.data.telegram.TelegramClient
 import com.arsipsenja.data.work.UploadWorker
 import java.util.UUID
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -27,6 +28,17 @@ import kotlinx.coroutines.flow.combine
  * ViewModel layar unggah: pemilihan koleksi tujuan, antrean WorkManager,
  * dan aliran progres transfer langsung dari TDLib.
  */
+/**
+ * Kunci pengurutan antrean unggah (murni, dapat diuji):
+ * bertanda prioritas dulu (0), lalu yang sedang berjalan (1), lalu sisanya (2).
+ */
+internal fun kunciUrutAntrean(prioritas: Boolean, sedangBerjalan: Boolean): Int =
+    when {
+        prioritas -> 0
+        sedangBerjalan -> 1
+        else -> 2
+    }
+
 class UnggahViewModel(
     private val repo: ArsipRepository,
     private val workManager: WorkManager,
@@ -44,6 +56,10 @@ class UnggahViewModel(
     private val _ruteOtomatis = MutableStateFlow(false)
     /** True: tiap berkas dirutekan ke kategori sesuai tipe berkasnya. */
     val ruteOtomatis: StateFlow<Boolean> = _ruteOtomatis.asStateFlow()
+
+    private val _hanyaWifi = MutableStateFlow(false)
+    /** True: unggahan ditahan WorkManager selama di jaringan seluler. */
+    val hanyaWifi: StateFlow<Boolean> = _hanyaWifi.asStateFlow()
 
     private val _pesan = MutableStateFlow<PesanStatus?>(null)
     val pesan: StateFlow<PesanStatus?> = _pesan.asStateFlow()
@@ -67,13 +83,28 @@ class UnggahViewModel(
         }
     }
 
-    /** Antrean pekerjaan unggah (baru → lama), termasuk yang sudah selesai. */
-    val antrean: StateFlow<List<WorkInfo>> =
-        workManager.getWorkInfosByTagFlow(ArsipRepository.TAG_UNGGAH)
-            .map { daftar ->
-                daftar.sortedByDescending { it.state == WorkInfo.State.RUNNING }
-            }
+    /** WorkId yang ditandai prioritas — reaktif dari Room. */
+    val prioritasUnggah: StateFlow<List<String>> =
+        repo.amatiPrioritasUnggah()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * Antrean pekerjaan unggah: bertanda prioritas di atas, lalu yang sedang
+     * berjalan, lalu sisanya. Termasuk pekerjaan yang sudah selesai.
+     */
+    val antrean: StateFlow<List<WorkInfo>> =
+        combine(
+            workManager.getWorkInfosByTagFlow(ArsipRepository.TAG_UNGGAH),
+            prioritasUnggah,
+        ) { daftar, prioritas ->
+            val bertanda = prioritas.toSet()
+            daftar.sortedBy { info ->
+                kunciUrutAntrean(
+                    info.id.toString() in bertanda,
+                    info.state == WorkInfo.State.RUNNING,
+                )
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val _transfer = MutableStateFlow<Map<Int, ProgresBerkas>>(emptyMap())
 
@@ -85,6 +116,9 @@ class UnggahViewModel(
         // tidak mati sendiri setiap aplikasi dibuka.
         viewModelScope.launch {
             pengaturan.ruteOtomatis.collect { _ruteOtomatis.value = it }
+        }
+        viewModelScope.launch {
+            pengaturan.hanyaWifi.collect { _hanyaWifi.value = it }
         }
         viewModelScope.launch {
             telegram.progresBerkas.collect { p ->
@@ -168,6 +202,11 @@ class UnggahViewModel(
     fun setRuteOtomatis(aktif: Boolean) {
         _ruteOtomatis.value = aktif
         viewModelScope.launch { pengaturan.setRuteOtomatis(aktif) }
+    }
+
+    fun setHanyaWifi(aktif: Boolean) {
+        _hanyaWifi.value = aktif
+        viewModelScope.launch { pengaturan.setHanyaWifi(aktif) }
     }
 
     /**
@@ -286,6 +325,33 @@ class UnggahViewModel(
         combine(koleksi, _koleksiTerpilih) { daftar, kunci ->
             daftar.firstOrNull { it.kunci == kunci }?.nama
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /**
+     * Ambil workId Arsip Senja dari [WorkInfo].
+     * Setiap pekerjaan unggah diberi tag "unggah-<uuid>" saat antre
+     * ([ArsipRepository.mulaiUnggah]); dari tag itulah workId dipulihkan.
+     */
+    fun workIdDariInfo(info: WorkInfo): String? =
+        info.tags.firstOrNull { it.startsWith("unggah-") }?.removePrefix("unggah-")
+
+    /** Jeda manual pekerjaan unggah; status tersimpan persisten di Room. */
+    fun jedaUnggah(workId: String) {
+        viewModelScope.launch { repo.setJedaUnggah(workId, true) }
+    }
+
+    /** Lanjutkan pekerjaan unggah yang sedang dijeda. */
+    fun lanjutkanUnggah(workId: String) {
+        viewModelScope.launch { repo.setJedaUnggah(workId, false) }
+    }
+
+    /** Tandai/hapus tanda prioritas satu pekerjaan unggah. */
+    fun tandaiPrioritas(workId: String, prioritas: Boolean) {
+        viewModelScope.launch { repo.setPrioritasUnggah(workId, prioritas) }
+    }
+
+    /** Status jeda reaktif untuk satu pekerjaan; false bila belum pernah dijeda. */
+    fun statusJeda(workId: String): Flow<Boolean> =
+        repo.amatiJedaUnggah(workId)
 
     companion object {
         val Pabrik = pabrikKontainer { wadah ->

@@ -16,6 +16,7 @@ import com.arsipsenja.util.ArahUrut
 import com.arsipsenja.util.TampilanDasbor
 import com.arsipsenja.util.UrutBerkas
 import java.security.SecureRandom
+import java.util.Calendar
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -128,6 +129,13 @@ class PengaturanStore(private val context: Context) {
 
     suspend fun setRuteOtomatis(aktif: Boolean) {
         store.edit { it[KUNCI_RUTE_OTOMATIS] = aktif }
+    }
+
+    /** Toggle "Hanya unggah via Wi-Fi" — menahan transfer di jaringan seluler. */
+    val hanyaWifi: Flow<Boolean> = store.data.map { p -> p[KUNCI_HANYA_WIFI] ?: false }
+
+    suspend fun setHanyaWifi(aktif: Boolean) {
+        store.edit { it[KUNCI_HANYA_WIFI] = aktif }
     }
 
     suspend fun perluBiometrik(): Boolean = biometrikAktif.first()
@@ -246,6 +254,30 @@ class PengaturanStore(private val context: Context) {
         amanah.edit().remove(KUNCI_DB).commit()
         return true
     }
+    
+    /** Menyimpan tanggal ketika kartu Senja Memories ditolak. */
+    suspend fun setSenjaMemoriesDismissed() {
+        store.edit {
+            val calendar = Calendar.getInstance()
+            val tahun = calendar.get(Calendar.YEAR)
+            val bulan = calendar.get(Calendar.MONTH) + 1 // January is 0
+            val hari = calendar.get(Calendar.DAY_OF_MONTH)
+            val tanggal = "$tahun-%02d-%02d".format(bulan, hari)
+            it[KUNCI_SENJA_MEMORIES_DISMISSED_DATE] = tanggal
+        }
+    }
+    
+    /** Mengembalikan true jika kartu Senja Memories telah ditolak untuk hari ini. */
+    suspend fun isSenjaMemoriesDismissed(): Boolean {
+        val tanggalDisimpan = store.data.first()[KUNCI_SENJA_MEMORIES_DISMISSED_DATE]
+        if (tanggalDisimpan == null) return false
+        val calendar = Calendar.getInstance()
+        val tahunSekarang = calendar.get(Calendar.YEAR)
+        val bulanSekarang = calendar.get(Calendar.MONTH) + 1
+        val hariSekarang = calendar.get(Calendar.DAY_OF_MONTH)
+        val tanggalSekarang = "$tahunSekarang-%02d-%02d".format(bulanSekarang, hariSekarang)
+        return tanggalDisimpan == tanggalSekarang
+    }
 
     private companion object {
         const val TAG = "PengaturanStore"
@@ -257,8 +289,10 @@ class PengaturanStore(private val context: Context) {
         val KUNCI_SINKRON_TERAKHIR = longPreferencesKey("sinkron_terakhir")
         val KUNCI_GAGAL_DILAPORKAN = stringSetPreferencesKey("notifikasi_gagal_unggah")
         val KUNCI_RUTE_OTOMATIS = booleanPreferencesKey("rute_otomatis")
+        val KUNCI_HANYA_WIFI = booleanPreferencesKey("hanya_wifi")
         const val KUNCI_API_ID = "telegram_api_id"
         const val KUNCI_API_HASH = "telegram_api_hash"
         const val KUNCI_DB = "kunci_db_tdlib"
+        val KUNCI_SENJA_MEMORIES_DISMISSED_DATE = stringPreferencesKey("senja_memories_dismissed_date")
     }
 }
