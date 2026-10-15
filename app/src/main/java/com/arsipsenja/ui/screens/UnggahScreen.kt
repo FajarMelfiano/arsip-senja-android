@@ -350,7 +350,7 @@ private fun BarisAntrean(info: WorkInfo, onBatalkan: () -> Unit) {
         )
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
-            val namaBerkas = info.inputData.getString(UploadWorker.K_NAMA)
+            val namaBerkas = info.progress.getString(UploadWorker.K_NAMA)
                 ?.takeIf { it.isNotBlank() }
                 ?: "Pekerjaan ${info.id.toString().take(8)}"
             Text(

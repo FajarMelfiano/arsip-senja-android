@@ -132,7 +132,7 @@ class UnggahViewModel(
         val alasan = info.outputData.getString(UploadWorker.K_PESAN_GALAT)
             ?.takeIf { it.isNotBlank() }
             ?: "Unggah gagal."
-        val nama = info.inputData.getString(UploadWorker.K_NAMA)
+        val nama = info.progress.getString(UploadWorker.K_NAMA)
             ?.takeIf { it.isNotBlank() }
         val inti = if (alasan == "Unggah gagal.") alasan else "Unggahan gagal: $alasan"
         return if (nama != null) "$nama — $inti" else inti

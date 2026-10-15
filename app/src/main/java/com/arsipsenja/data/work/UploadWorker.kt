@@ -75,6 +75,9 @@ class UploadWorker(
         }
 
         val namaAsli = namaDariUri(uri)
+        // Umumkan nama berkas lewat progress agar UI antrean bisa
+        // menampilkannya (WorkInfo tidak membawa inputData).
+        setProgress(workDataOf(K_NAMA to namaAsli))
         val mime = applicationContext.contentResolver.getType(uri) ?: "*/*"
         val tipe = TipeFile.dariMime(mime, namaAsli)
 
