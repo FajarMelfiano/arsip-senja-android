@@ -28,6 +28,7 @@ import com.arsipsenja.data.telegram.keEntity
 import com.arsipsenja.data.work.DownloadWorker
 import com.arsipsenja.data.work.UploadWorker
 import com.arsipsenja.util.TipeFile
+import com.arsipsenja.util.captionTanpaHeader
 import android.provider.OpenableColumns
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
@@ -450,7 +451,12 @@ class ArsipRepository(
     }
 
     private suspend fun tarikRiwayatBaru(kunci: KunciKoleksi): Int {
-        val sudahAda = berkasDao.semuaId().toHashSet()
+        // High-water mark menggantikan `semuaId()` yang menyedot seluruh tabel
+        // setiap penyapuan. Telegram memberi message id yang selalu menaik per
+        // chat, jadi apa pun yang lebih baru dari nilai ini pasti belum pernah
+        // diindeks — dan untuk vault yang sama hasilnya 0, bukan daftar
+        // puluhan ribu id yang dibuang lagi.
+        val batasBawah = berkasDao.messageIdTertinggi(kunci.chatId, kunci.topicId) ?: 0L
         var nomor = berkasDao.jumlah(kunci.chatId, kunci.topicId)
         var dari = 0L
         var baru = 0
@@ -464,11 +470,8 @@ class ArsipRepository(
             }
             if (pesan.isEmpty()) return baru
 
-            val mentah = pesan.mapNotNull { it.keBerkasMentah() }
-            val entri = mentah.mapNotNull { b ->
-                val id = BerkasArsipEntity.kunci(b.chatId, b.messageId)
-                if (id in sudahAda) return@mapNotNull null
-                sudahAda += id
+            val mentah = pesan.filter { it.id > batasBawah }.mapNotNull { it.keBerkasMentah() }
+            val entri = mentah.map { b ->
                 nomor += 1
                 baru += 1
                 b.keEntity(
@@ -478,11 +481,65 @@ class ArsipRepository(
                     sekarang = sekarang,
                 )
             }
-            berkasDao.simpanSemua(entri)
+            if (entri.isNotEmpty()) berkasDao.simpanSemua(entri)
             dari = pesan.last().id
             if (pesan.size < HALAMAN_RIWAYAT) return baru
         }
         return baru
+    }
+
+    /**
+     * Selaraskan indeks lokal dengan isi sebenarnya di Telegram untuk satu
+     * koleksi: apa pun yang hilang dari vault ditandai, bukan dibiarkan
+     * menyesatkan.
+     *
+     * ## Mengapa ini diperlukan
+     *
+     * Sinkron lama bersifat **tambah-saja**. Kalau sebuah pesan dihapus dari
+     * channel di aplikasi Telegram — atau dari perangkat lain, atau karena
+     * pesan itu dihapus automatik setelah 30 hari di channel non-kategori —
+     * barisnya tetap ada di Room selamanya. Katalog menampilkan berkas yang
+     * tidak ada, dan mengunduhnya akan mencoba ulang tanpa henti.
+     *
+     * Pendekatan **tandai-lalu-sapu**: seluruh baris koleksi ditandai "perlu
+     * dicek" (1), setiap pesan yang benar-benar ditemukan mengembalikan
+     * statusnya ke 0, dan sisa yang bernilai 1 memang tidak ada lagi.
+     * Biayanya O(jumlah pesan), bukan O(jumlah baris arsip) — tidak perlu
+     * daftar `IN` berisi puluhan ribu id.
+     *
+     * Baris yang hilang **tidak dihapus**: berkas salinan lokal pengguna harus
+     * tetap bisa ditemukan, dan keputusan menghapusnya adalah hak pengguna.
+     *
+     * @return jumlah baris yang ditandai hilang.
+     */
+    suspend fun selaraskanKoleksi(kunci: KunciKoleksi): Int {
+        val ditandai = berkasDao.tandaiPerluDicek(kunci.chatId, kunci.topicId)
+        if (ditandai == 0) return 0
+
+        // Telusuri seluruh riwayat — bukan hanya yang lebih baru — karena
+        // tujuan justru memeriksa berkas lama.
+        var dari = 0L
+        repeat(BATAS_HALAMAN_SELARAS) {
+            val pesan = if (kunci.adalahTopik) {
+                telegram.riwayatTopik(kunci.chatId, kunci.topicId, dari, HALAMAN_RIWAYAT)
+            } else {
+                telegram.riwayat(kunci.chatId, dari, HALAMAN_RIWAYAT)
+            }
+            if (pesan.isEmpty()) return@repeat
+            for (p in pesan) {
+                berkasDao.tandaiMasihAda(BerkasArsipEntity.kunci(p.chatId, p.id))
+            }
+            dari = pesan.last().id
+            if (pesan.size < HALAMAN_RIWAYAT) return@repeat
+        }
+        return berkasDao.jumlahHilang(kunci.chatId, kunci.topicId)
+    }
+
+    /** Selaraskan seluruh koleksi pribadi; mengembalikan total berkas hilang. */
+    suspend fun selaraskanSemua(): Int = kunciSinkron.withLock {
+        var total = 0
+        koleksiDao.ambilSemuaPribadi().forEach { total += selaraskanKoleksi(it.kunci) }
+        total
     }
 
     /**
@@ -625,6 +682,8 @@ class ArsipRepository(
         lingkupRealtime.launch { kolektorKoneksi() }
         lingkupRealtime.launch { kolektorJudulChat() }
         lingkupRealtime.launch { kolektorInfoTopik() }
+        lingkupRealtime.launch { kolektorPenghapusan() }
+        lingkupRealtime.launch { kolektorPerubahan() }
         Log.i(tag, "Mesin realtime dimulai (jendela batch ${AturanRealtime.JENDELA_BATCH_MS} ms).")
     }
 
@@ -746,6 +805,57 @@ class ArsipRepository(
             val entri = koleksiDao.ambil(chatId, topicId) ?: return@collect
             val baru = nama.ifBlank { entri.nama }
             if (baru != entri.nama) koleksiDao.simpan(entri.copy(nama = baru))
+        }
+    }
+
+    /**
+     * Tandai berkas yang pesannya dihapus di Telegram.
+     *
+     * Baris tidak dihapus: bila pengguna sudah mengunduh salinannya, berkas
+     * itu masih berguna dan harus tetap bisa ditemukan. Yang hilang adalah
+     * **salinan di vault**, dan itu memang informasi yang harus jujur
+     * ditampilkan — bukan disembunyikan sampai pengguna menemukan sendiri
+     * saat mengunduh gagal.
+     */
+    private suspend fun kolektorPenghapusan() {
+        telegram.pesanDihapus.collect { (chatId, messageId) ->
+            val id = BerkasArsipEntity.kunci(chatId, messageId)
+            if (berkasDao.ambilId(id) == null) return@collect
+            runCatching { berkasDao.tandaiHilang(id) }
+                .onFailure { Log.w(tag, "Gagal menandai pesan terhapus $id: ${it.message}") }
+        }
+    }
+
+    /**
+     * Selaraskan baris yang pesannya diedit atau diganti isinya.
+     *
+     * Hanya kolom yang berasal dari Telegram yang ditulis ulang. `tdLocalPath`
+     * dan `thumbPath` **tidak boleh** disentuh: keduanya menyimpan kerja
+     * lokal pengguna, dan menimpanya dengan null (seperti yang terjadi bila
+     * @Upsert dipakai untuk pesan yang sudah terindeks) membuat berkas yang
+     * sudah diunduh tampak hilang lagi.
+     */
+    private suspend fun kolektorPerubahan() {
+        telegram.pesanDiubah.collect { pesan ->
+            val id = BerkasArsipEntity.kunci(pesan.chatId, pesan.id)
+            val lama = berkasDao.ambilId(id) ?: return@collect
+            val baru = pesan.keBerkasMentah() ?: return@collect
+            if (baru.nama == lama.nama && baru.ukuran == lama.ukuran &&
+                baru.caption == lama.deskripsi
+            ) {
+                return@collect
+            }
+            runCatching {
+                berkasDao.perbaruiDariTelegram(
+                    id = id,
+                    nama = baru.nama,
+                    ukuran = baru.ukuran,
+                    mime = baru.mime,
+                    tipe = baru.tipe.name,
+                    deskripsi = captionTanpaHeader(baru.caption),
+                    tdFileId = baru.tdFileId,
+                )
+            }.onFailure { Log.w(tag, "Gagal menyelaraskan pesan $id: ${it.message}") }
         }
     }
 
@@ -1438,6 +1548,13 @@ class ArsipRepository(
     companion object {
         const val HALAMAN_RIWAYAT = 100
         const val BATAS_HALAMAN = 5
+
+        /**
+         * Halaman maksimum saat penyelarasan. Lebih besar daripada
+         * [BATAS_HALAMAN] karena penyelarasan harus menelusuri berkas **lama**
+         * untuk memverifikasi bahwa mereka masih ada.
+         */
+        const val BATAS_HALAMAN_SELARAS = 50
 
         /** Nama bawaan grup vault yang dibuat otomatis. */
         const val NAMA_VAULT_BAWAAN = "Arsip Senja"

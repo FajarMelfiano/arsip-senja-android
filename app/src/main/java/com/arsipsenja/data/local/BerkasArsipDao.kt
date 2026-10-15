@@ -170,6 +170,47 @@ interface BerkasArsipDao {
     @Query("UPDATE berkas_arsip SET statusSinkron = 0 WHERE id = :id")
     suspend fun tandaiMasihAda(id: String)
 
+    /**
+     * Tandai satu baris sebagai hilang karena pesannya dihapus di Telegram.
+     *
+     * Baris sengaja tidak dihapus: salinan lokal pengguna mungkin masih ada
+     * dan masih berguna. Yang hilang adalah salinan di vault, dan itu perlu
+     * ditampilkan secara jujur.
+     */
+    @Query("UPDATE berkas_arsip SET statusSinkron = 1 WHERE id = :id")
+    suspend fun tandaiHilang(id: String)
+
+    /**
+     * Tulis ulang hanya kolom yang berasal dari Telegram.
+     *
+     * Dipakai saat pesan diedit. Sengaja BUKAN @Upsert: @Upsert menimpa
+     * seluruh kolom, sehingga `tdLocalPath` dan `thumbPath` — hasil kerja
+     * lokal pengguna — ikut terhapus dan berkas yang sudah diunduh langsung
+     * kembali terlihat seperti belum diunduh.
+     */
+    @Query(
+        """
+        UPDATE berkas_arsip SET
+            nama = :nama,
+            ukuran = :ukuran,
+            mime = :mime,
+            tipe = :tipe,
+            deskripsi = :deskripsi,
+            tdFileId = :tdFileId,
+            statusSinkron = 0
+        WHERE id = :id
+        """,
+    )
+    suspend fun perbaruiDariTelegram(
+        id: String,
+        nama: String,
+        ukuran: Long,
+        mime: String,
+        tipe: String,
+        deskripsi: String?,
+        tdFileId: Int,
+    )
+
     /** How many rows yang setelah penyapuan tetap bernilai 1 → hilang. */
     @Query(
         """

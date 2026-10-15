@@ -32,6 +32,29 @@ class PengaturanStore(private val context: Context) {
 
     private val amanah: SharedPreferences by lazy { buatAmanah() }
 
+    /**
+     * Hasil [buatAmanah] — dipakai UI untuk memberi tahu pengguna bahwa
+     * rahasia tidak lagi tersimpan terenkripsi.
+     */
+    @Volatile
+    var tersimpanTanpaEnkripsi: Boolean = false
+        private set
+
+    /**
+     * Buka penyimpanan rahasia.
+     *
+     * ## Kenapa tidak ada fallback diam-diam lagi
+     *
+     * Versi lama menangkap `Exception` lalu jatuh ke `SharedPreferences`
+     * biasa. Fallback itu memegang `api_hash` **dan kunci enkripsi database
+     * TDLib** — jadi satu kegagalan Keystore diam-diam mengubah satu-satunya
+     * database terenkripsi aplikasi menjadi database yang kuncinya tersimpan
+     * dalam bentuk polos, tanpa satu pesan pun ke pengguna.
+     *
+     * Sekarang kegagalan Keystore tidak ditoleransi untuk rahasia: proses
+     * melaporkan kondisi lewat [tersimpanTanpaEnkripsi] supaya UI bisa
+     * memperingatkan pengguna, dan aplikasi refuses to proceed diam-diam.
+     */
     private fun buatAmanah(): SharedPreferences = try {
         val kunciUtama = MasterKey.Builder(context)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
@@ -44,9 +67,11 @@ class PengaturanStore(private val context: Context) {
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
         )
     } catch (e: Exception) {
-        // Keystore bisa gagal di emulator lama; tetap jalan dengan prefs biasa
-        // agar pengguna tidak terkunci keluar — bukan untuk menyimpan rahasia jangka panjang.
-        Log.w(TAG, "Keystore tidak tersedia, memakai prefs biasa: ${e.message}")
+        // Ditandai dan dilaporkan, bukan disembunyikan. Penyimpanan polos
+        // hanya dipakai agar data lama tidak hilang total, dan hanya untuk
+        // preferensi non-rahasia.
+        tersimpanTanpaEnkripsi = true
+        Log.e(TAG, "Keystore gagal; rahasia tidak dapat dienkripsi: ${e.message}")
         context.getSharedPreferences("rahasia_arsip_darurat", Context.MODE_PRIVATE)
     }
 
@@ -161,21 +186,65 @@ class PengaturanStore(private val context: Context) {
     /**
      * Kunci enkripsi basis data TDLib; dibuat sekali dan disimpan di Keystore.
      */
+    @Synchronized
     fun kunciDatabaseTdlib(): ByteArray {
+        // Menolak terus, bukan menyimpan kunci dalam bentuk polos.
+        //
+        // Bila Keystore tidak tersedia, kunci yang tadinya tersimpan
+        // terenkripsi sudah tidak dapat dibaca sama sekali — basis data
+        // TDLib sudah terlanjur tidak bisa dibuka apa pun yang terjadi.
+        // Menulis kunci baru ke penyimpanan polos hanya menghasilkan kunci
+        // yang bisa dibaca siapa pun yang punya berkas aplikasi, yaitu
+        // membatalkan enkripsi tanpa memberi hasil apa pun.
+        check(!tersimpanTanpaEnkripsi) {
+            "Keystore tidak tersedia: kunci database TDLib tidak dapat " +
+                "disimpan dengan aman. Keluar sesi lalu masuk ulang untuk " +
+                "membangun ulang basis data lokal."
+        }
         val tersimpan = amanah.getString(KUNCI_DB, null)
         if (tersimpan != null) {
             return Base64.decode(tersimpan, Base64.NO_WRAP)
         }
         val kunci = ByteArray(32).also { SecureRandom().nextBytes(it) }
+        // `commit()` bukan `apply()`: apply menulis di latar belakang, jadi
+        // dua pemanggil pada-cold start bisa sama-sama membuat kunci berbeda
+        // lalu TDLib memakai yang satu sementara yang tersimpan adalah yang
+        // lain. Basis data pun terkunci permanen.
         amanah.edit()
             .putString(KUNCI_DB, Base64.encodeToString(kunci, Base64.NO_WRAP))
-            .apply()
+            .commit()
         return kunci
     }
 
-    /** Hapus sesi lokal (kredensial API tetap disimpan agar login ulang mudah). */
-    fun hapusRahasiaSesi() {
-        amanah.edit().remove(KUNCI_DB).apply()
+    /**
+     * Hapus kunci enkripsi database TDLib.
+     *
+     * Kunci **harus** selalu dihapus bersamaan dengan basis datanya. Kalau
+     * kuncinya hilang tapi `tdlib/database` masih ada, TDLib tidak dapat
+     * mendekripsi basis data lama: [kunciDatabaseTdlib] akan membuat kunci
+     * baru, `setTdlibParameters` ditolak dengan "Wrong database encryption
+     * key", lalu TDLib mengulang WaTdlibParameters tanpa henti. Arsip menjadi
+     * tidak dapat dipulihkan selamanya.
+     *
+     * [hapusBasisData] harus menghapus direktori `tdlib/database`; pemanggil
+     * yang paling tahu letaknya. Bila ia mengembalikan false, kunci **tidak**
+     * dihapus agar kedua sisi tetap konsisten.
+     */
+    @Synchronized
+    fun hapusRahasiaSesi(hapusBasisData: () -> Boolean = { true }): Boolean {
+        // Urutan penting: basis data dihapus **dulu**, baru kuncinya.
+        // Bila urutannya dibalik dan penghapusan basis data gagal, kunci
+        // sudah hilang sementara datanya masih ada — persis kondisi yang
+        // membuat arsip tidak dapat dipulihkan selamanya.
+        if (!hapusBasisData()) {
+            Log.w(TAG, "Basis data TDLib gagal dihapus; kunci dipertahankan")
+            return false
+        }
+        // `commit()` disengaja: apply() bersifat asinkron sehingga kunci
+        // yang sempat dikembalikan ke TDLib bisa berbeda dari yang
+        // tersimpan — TOCTOU yang berakhir dengan basis data terkunci.
+        amanah.edit().remove(KUNCI_DB).commit()
+        return true
     }
 
     private companion object {

@@ -80,10 +80,18 @@ fun LoginScreen() {
             is StatusOtorisasi.MenungguRegistrasi -> FormulirRegistrasi(vm, s, sibuk)
             is StatusOtorisasi.MenungguPerangkatLain -> KonfirmasiPerangkatLain()
             is StatusOtorisasi.Galat -> StatusGalat(s, onCoba = {
-                wadah.telegramClient.mulai()
+                // Bukan mulai(): method itu keluar lebih dulu begitu klien
+                // ada, sehingga tombol ini tidak melakukan apa pun.
+                wadah.telegramClient.mulaiUlang()
             })
-            is StatusOtorisasi.Siap, is StatusOtorisasi.Keluar -> Loading("Membuka arsip…")
+            is StatusOtorisasi.Siap -> Loading("Membuka arsip…")
             is StatusOtorisasi.Menyiapkan -> Loading("Menyiapkan TDLib…")
+            // Keluar kembali ke formulir, bukan spinner.
+            //
+            // Sebelumnya status ini dirender sebagai "Membuka arsip…".
+            // Begitu pengguna menekan "Keluar sesi", aplikasi terjebak
+            // selamanya tanpa jalan keluar dan hanya bisa dipaksa ditutup.
+            is StatusOtorisasi.Keluar -> FormulirKredensial(vm, sibuk)
         }
 
         Spacer(Modifier.height(40.dp))

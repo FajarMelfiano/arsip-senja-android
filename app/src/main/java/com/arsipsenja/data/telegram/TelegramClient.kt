@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 import org.drinkless.tdlib.Client
 import org.drinkless.tdlib.TdApi
@@ -69,6 +70,29 @@ class TelegramClient(
     )
     val pesanBaru: SharedFlow<TdApi.Message> = _pesanBaru.asSharedFlow()
 
+    /**
+     * (chatId, messageId) setiap kali pesan dihapus di Telegram.
+     *
+     * Tanpa handler ini indeks lokal berbohong permanen: berkas tetap
+     * ditampilkan padahal sudah tidak ada di vault, dan mengunduhnya
+     * akan retry tanpa henti.
+     */
+    private val _pesanDihapus = MutableSharedFlow<Pair<Long, Long>>(
+        extraBufferCapacity = 64,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    val pesanDihapus: SharedFlow<Pair<Long, Long>> = _pesanDihapus.asSharedFlow()
+
+    /**
+     * Pesan yang diedit (caption berubah atau dokumen diganti). Dibawa penuh
+     * agar indeks lokal bisa diselaraskan tanpa menebak.
+     */
+    private val _pesanDiubah = MutableSharedFlow<TdApi.Message>(
+        extraBufferCapacity = 32,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    val pesanDiubah: SharedFlow<TdApi.Message> = _pesanDiubah.asSharedFlow()
+
     private val _koneksi = MutableStateFlow(false)
     /**
      * True bila TDLib melaporkan ConnectionStateReady. Dipakai mesin
@@ -112,6 +136,23 @@ class TelegramClient(
     @Synchronized
     fun mulai() {
         if (klien != null) return
+        if (!pengaturan.adaKredensial()) {
+            _status.value = StatusOtorisasi.MenungguKredensial
+            return
+        }
+        mulaiDenganKredensial()
+    }
+
+    /**
+     * Mulai ulang klien dari awal: tutup yang lama bila ada, lalu buka baru.
+     *
+     * [mulai] sengaja tidak melakukan ini — begitu klien ada, ia keluar
+     * lebih dulu, sehingga tombol "Coba lagi" di layar login tidak melakukan
+     * apa pun (klien sudah non-null). Method inilah yang dipanggil tombol itu.
+     */
+    @Synchronized
+    fun mulaiUlang() {
+        klien?.let { kirimTutup(); klien = null }
         if (!pengaturan.adaKredensial()) {
             _status.value = StatusOtorisasi.MenungguKredensial
             return
@@ -169,12 +210,33 @@ class TelegramClient(
     /** Putus sesi di Telegram (keluar) — kredensial lokal tetap tersimpan. */
     fun keluar() {
         val k = klien ?: run {
-            pengaturan.hapusRahasiaSesi()
+            // Klien sudah tertutup: basis data tidak lagi dipakai, jadi aman
+            // dihapus bersama kuncinya. Tanpa ini, kunci lama tertinggal dan
+            // basis data terenkripsi tidak dapat dibuka pada sesi berikutnya.
+            pengaturan.hapusRahasiaSesi { hapusBerkasTdlib() }
             _status.value = StatusOtorisasi.Keluar
             return
         }
         _status.value = StatusOtorisasi.Keluar
         k.send(TdApi.LogOut(), null)
+    }
+
+    /**
+     * Hapus seluruh basis data dan cache TDLib.
+     *
+     * Dipanggil tepat sebelum kuncinya dihapus. Mengembalikan false bila
+     * direktori masih ada sehingga pemanggil bisa membatalkan penghapusan
+     * kunci.
+     */
+    private fun hapusBerkasTdlib(): Boolean {
+        val akar = File(context.filesDir, "tdlib")
+        if (!akar.exists()) return true
+        return try {
+            akar.deleteRecursively() && !akar.exists()
+        } catch (e: Exception) {
+            Log.w(tag, "Gagal menghapus berkas TDLib: ${e.message}")
+            false
+        }
     }
 
     private fun kirimTutup() {
@@ -209,6 +271,17 @@ class TelegramClient(
                 _pesanTerkirim.tryEmit(PesanTerkirim(obj.message, obj.oldMessageId))
             }
             is TdApi.UpdateNewMessage -> _pesanBaru.tryEmit(obj.message)
+            is TdApi.UpdateDeleteMessages -> {
+                val zul = obj.messageIds ?: return
+                for (id in zul) _pesanDihapus.tryEmit(obj.chatId to id)
+            }
+            // `UpdateMessageEdited` hanya membawa chatId/messageId/editDate —
+            // tidak ada isi pesan. Isi terbaru harus diambil ulang; tanpa itu
+            // caption yang diubah di Telegram akan tetap stale selamanya.
+            is TdApi.UpdateMessageEdited ->
+                ambilUlangPesan(obj.chatId, obj.messageId)
+            is TdApi.UpdateMessageContent ->
+                ambilUlangPesan(obj.chatId, obj.messageId)
             is TdApi.UpdateConnectionState ->
                 _koneksi.value = obj.state is TdApi.ConnectionStateReady
             is TdApi.UpdateChatTitle ->
@@ -223,7 +296,27 @@ class TelegramClient(
         }
     }
 
-    private fun tanganiOtorisasi(state: TdApi.AuthorizationState?) {
+    /**
+ * Minta isi terbaru satu pesan lalu pancarkan ke [_pesanDiubah].
+ *
+ * Dipanggil dari thread update TDLib, jadi tidak boleh suspend. Galat
+ * diabaikan dengan sengaja: gagal mengambil ulang bukan kondisi yang perlu
+ * dilaporkan pengguna — penyelarasan manual tetap bisa menutup kesenjangan.
+ */
+private fun ambilUlangPesan(chatId: Long, messageId: Long) {
+    val k = klien ?: return
+    k.send(
+        TdApi.GetMessage(chatId, messageId),
+        { obj ->
+            // GetMessage adalah Function<Message>, jadi balikannya langsung
+            // objek pesan — bukan Amplop yang memuat `.message`.
+            val pesan = obj as? TdApi.Message ?: return@send
+            _pesanDiubah.tryEmit(pesan)
+        },
+    )
+}
+
+private fun tanganiOtorisasi(state: TdApi.AuthorizationState?) {
         when (state) {
             is TdApi.AuthorizationStateWaitTdlibParameters -> kirimParameter()
             is TdApi.AuthorizationStateWaitPhoneNumber -> _status.value = StatusOtorisasi.MenungguNomor
@@ -318,23 +411,50 @@ class TelegramClient(
     // Perintah dasar
     // ---------------------------------------------------------------------
 
-    /** Kirim permintaan dan tunggu hasilnya; galat TDLib menjadi [TelegramException]. */
-    suspend fun <T : TdApi.Object> kirim(fn: TdApi.Function<T>): T {
+    /**
+     * Kirim permintaan dan tunggu hasilnya; galat TDLib menjadi [TelegramException].
+     *
+     * ## Kenapa ada batas waktu
+     *
+     * Tanpa batas waktu, permintaan yang tidak pernah dijawab (perangkat sedang
+     * offline, TDLib membuang permintaan) membuat coroutine menggantung
+     * selamanya. Di layar login hal ini mematikan seluruh form karena flag
+     * "sibuk" tidak pernah kembali false; di sinkron, mutex terkunci permanen
+     * dan tidak ada sinkron berikutnya yang bisa berjalan.
+     *
+     * Timeout dibungkus menjadi [TelegramException] biasa agar pemanggil tidak
+     * perlu membedakan jenis galat.
+     */
+    suspend fun <T : TdApi.Object> kirim(
+        fn: TdApi.Function<T>,
+        batasWaktu: Long = BATAS_KIRIM_MS,
+    ): T {
         val k = klien ?: throw TelegramException("TDLib belum siap")
-        return suspendCancellableCoroutine { kontinu ->
-            k.send(
-                fn,
-                { obj ->
-                    when {
-                        obj is TdApi.Error -> kontinu.resumeWith(Result.failure(TelegramException(obj)))
-                        !kontinu.isActive -> Unit
-                        else -> {
-                            @Suppress("UNCHECKED_CAST")
-                            kontinu.resumeWith(Result.success(obj as T))
-                        }
-                    }
-                },
-                { e -> kontinu.resumeWith(Result.failure(e)) },
+        return try {
+            withTimeout(batasWaktu) {
+                suspendCancellableCoroutine { kontinu ->
+                    k.send(
+                        fn,
+                        { obj ->
+                            when {
+                                obj is TdApi.Error ->
+                                    kontinu.resumeWith(Result.failure(TelegramException(obj)))
+                                !kontinu.isActive -> Unit
+                                else -> {
+                                    @Suppress("UNCHECKED_CAST")
+                                    kontinu.resumeWith(Result.success(obj as T))
+                                }
+                            }
+                        },
+                        { e -> kontinu.resumeWith(Result.failure(e)) },
+                    )
+                }
+            }
+        } catch (e: TimeoutCancellationException) {
+            throw TelegramException(
+                pesan = "Permintaan Telegram melewati batas waktu ${batasWaktu / 1000} detik",
+                kode = 0,
+                cause = e,
             )
         }
     }
@@ -945,6 +1065,13 @@ class TelegramClient(
 
     companion object {
         private const val BATAS_UNGGAH = 30L * 60L * 1000L
+
+        /**
+         * Batas waktu default satu permintaan biasa (bukan unggah/unduh
+         * yang memang lambat). Cukup untuk operasi normal; mencegah
+         * goroutine menggantung permanen saat perangkat offline.
+         */
+        private const val BATAS_KIRIM_MS = 45_000L
 
         /** Warna ikon topik forum (RGB, aksen amber khas Arsip Senja). */
         private const val WARNA_TOPIK = 0xE8A33D
