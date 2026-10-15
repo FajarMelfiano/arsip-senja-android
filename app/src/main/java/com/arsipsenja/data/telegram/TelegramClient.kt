@@ -594,6 +594,20 @@ private fun tanganiOtorisasi(state: TdApi.AuthorizationState?) {
     }
 
     /**
+     * Chat yang layak menjadi kandidat vault saat **deteksi**.
+     *
+     * Lebih longgar dari [adalahVaultSah]: channel milik sendiri juga
+     * diterima karena aplikasi mendukung channel sebagai koleksi.
+     */
+    fun layakDeteksiVault(chat: TdApi.Chat): Boolean {
+        val tipe = chat.type
+        return PenjagaVault.layakDeteksi(
+            tipe is TdApi.ChatTypeSupergroup,
+            (tipe as? TdApi.ChatTypeSupergroup)?.isChannel ?: false,
+        )
+    }
+
+    /**
      * Label Bahasa Indonesia untuk tipe chat, dipakai di pesan galat vault
      * agar pengguna tahu masalah sebenarnya (tipe salah, bukan kepemilikan).
      * Perbandingan nama kelas dipakai agar tak bergantung pada semua varian
@@ -670,7 +684,7 @@ private fun tanganiOtorisasi(state: TdApi.AuthorizationState?) {
                     null
                 }
             }
-            .filter { adalahVaultSah(it) }
+            .filter { layakDeteksiVault(it) }
         var gagalPeriksa = 0
         val milikSendiri = supergroup.filter { chat ->
             try {
@@ -711,7 +725,7 @@ private fun tanganiOtorisasi(state: TdApi.AuthorizationState?) {
                     null
                 }
             }
-            .filter { adalahVaultSah(it) }
+            .filter { layakDeteksiVault(it) }
     }
 
     /**

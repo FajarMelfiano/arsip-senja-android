@@ -6,7 +6,6 @@ import android.os.StatFs
 import android.util.Log
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
-import androidx.work.ForegroundInfo
 import androidx.work.NetworkType
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
@@ -92,19 +91,11 @@ class UploadWorker(
         // terpotong dan seluruh pekerjaan diulang dari awal.
         val idNotif = Notifikasi.idUnggahKhusus(uri.toString())
         Notifikasi.tampilkanUnggah(applicationContext, namaAsli, 0, false, idNotif)
-        setForeground(
-            ForegroundInfo(
-                idNotif,
-                Notifikasi.bangunTransfer(
-                    applicationContext,
-                    idNotif,
-                    "Mengunggah…",
-                    namaAsli,
-                    100,
-                    0,
-                    false,
-                ),
-            ),
+        naikkanKeForeground(
+            context = applicationContext,
+            idNotif = idNotif,
+            judul = "Mengunggah…",
+            namaBerkas = namaAsli,
         )
 
         val ukuran = ukuranDari(uri)
@@ -117,7 +108,7 @@ class UploadWorker(
         // caption. Inilah yang membuat arsip dapat diverifikasi dan duplikat
         // dapat dikenali.
         val hashAsli = HashBerkas.hitungBerkas(berkasCache)
-        val grupId = if (hashAsli != null) grupIdDariHash(hashAsli) else java.util.UUID.randomUUID().toString()
+        val grupId = if (hashAsli != null) HeaderArsip.uuidDariHash(hashAsli) else java.util.UUID.randomUUID().toString()
         var gagal = false
         var pesanGagalTerakhir: String? = null
 
@@ -217,10 +208,6 @@ class UploadWorker(
      * Berkas dengan hash sama diunggah ke dua koleksi berbeda akan memakai
      * kelompok yang sama, sehingga penyatuan dan deteksi duplikat tetap bekerja.
      */
-    private fun grupIdDariHash(hash: String): String {
-        val ringkas = hash.take(8).toLong(16).toString(16)
-        return "g${ringkas.padStart(16, '0')}"
-    }
 
     /** Kegagalan terminal yang membawa pesan galat untuk ditampilkan UI. */
     private fun gagalDenganPesan(pesan: String): Result =

@@ -64,6 +64,31 @@ data class HeaderArsip(
         const val PANJANG_HASH = 64
 
         /**
+         * Turunkan UUID kelompok yang stabil dari hash isi.
+         *
+         * Berkas dengan isi sama diunggah ke koleksi berbeda akan mendapat
+         * kelompok sama, sehingga deteksi duplikat dan penyatuan potongan tetap
+         * bekerja lintas koleksi.
+         *
+         * ## Kenapa harus UUID sungguhan
+         *
+         * Versi lama membentuk string pendek seperti `g00000000ab12cd34`.
+         * Pola UUID di [HeaderArsip.susun] menuntut format 8-4-4-4-12,
+         * sehingga nilai itu **tidak cocok** dan field `g=` dibuang diam-diam —
+         * seluruh kelompok multi-potongan hilang begitu perangkat di-reset.
+         * Karena itu hasilnya diuji dengan memutar-balik lewat
+         * [uraiHeaderArsip], bukan hanya dicek panjangnya.
+         */
+        fun uuidDariHash(hash: String): String {
+            require(hash.length >= 32) { "Hash terlalu pendek untuk dijadikan UUID" }
+            val h = hash.lowercase()
+            require(h.all { it in '0'..'9' || it in 'a'..'f' }) { "Hash harus heksadesimal" }
+            // Bit versi 4 dan varian 10xx agar UUID-nya valid.
+            return "${h.substring(0, 8)}-${h.substring(8, 12)}-4${h.substring(13, 16)}-" +
+                "8${h.substring(17, 20)}-${h.substring(20, 32)}"
+        }
+
+        /**
          * Header untuk berkas yang tidak dipecah.
          *
          * @param hashSha256 hash isi berkas; null bila belum dihitung.

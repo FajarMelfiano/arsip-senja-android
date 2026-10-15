@@ -8,7 +8,6 @@ import android.provider.MediaStore
 import android.util.Log
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
-import androidx.work.ForegroundInfo
 import androidx.work.NetworkType
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
@@ -72,19 +71,11 @@ class DownloadWorker(
         // yang sama dipakai saat membatalkan agar tidak ada notifikasi nyangkut.
         val idNotif = Notifikasi.idUnduhKhusus(berkasId)
         Notifikasi.tampilkanUnduh(applicationContext, berkas.namaTampil, 0, false, idNotif)
-        setForeground(
-            ForegroundInfo(
-                idNotif,
-                Notifikasi.bangunTransfer(
-                    applicationContext,
-                    idNotif,
-                    "Mengunduh…",
-                    berkas.namaTampil,
-                    100,
-                    0,
-                    false,
-                ),
-            ),
+        naikkanKeForeground(
+            context = applicationContext,
+            idNotif = idNotif,
+            judul = "Mengunduh…",
+            namaBerkas = berkas.namaTampil,
         )
 
         return try {

@@ -184,6 +184,21 @@ object PenjagaVault {
         isSupergroup && !isChannel
 
     /**
+     * Layakkandidat vault yang **ditemukan**, bukan dibuat.
+     *
+     * Berbeda dengan [grupBaruSah]: sebuah channel yang dimiliki sendiri tetap
+     * sah sebagai arsip — aplikasi ini memang mendukung channel sebagai
+     * koleksi (topicId = 0, "channel lama"). Hanya pembuatan vault baru yang
+     * mewajibkan supergroup forum-siap, karena channel tidak punya topik.
+     *
+     * Memakai [grupBaruSah] untuk deteksi membuat vault channel lama tidak
+     * pernah ditemukan setelah aplikasi dipasang ulang; worse, aplikasi lalu
+     * membuat vault baru secara diam-diam sehingga arsip lama terseparasi dari indeks tanpa jejak.
+     */
+    fun layakDeteksi(isSupergroup: Boolean, isChannel: Boolean): Boolean =
+        isSupergroup || isChannel
+
+    /**
      * Pesan bila pembuatan vault menghasilkan channel, bukan grup.
      * Harus tampil sebagai GALAT (bukan "sukses" palsu) agar tidak ada
      * lagi vault channel yang diam-diam diaktifkan.
