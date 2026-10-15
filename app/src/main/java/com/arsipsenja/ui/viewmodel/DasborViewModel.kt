@@ -18,6 +18,7 @@ import com.arsipsenja.data.repo.PenjagaVault
 import com.arsipsenja.data.repo.StatusRealtime
 import com.arsipsenja.data.telegram.TelegramException
 import com.arsipsenja.util.ArahUrut
+import com.arsipsenja.util.AturanSenjaMemories
 import com.arsipsenja.util.StatusLokal
 import com.arsipsenja.util.TampilanDasbor
 import com.arsipsenja.util.TipeFile
@@ -35,6 +36,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.TimeZone
 
 /**
  * ViewModel dasbor: pencarian as-you-type, filter tipe/koleksi, urutan,
@@ -64,6 +66,46 @@ class DasborViewModel(
      */
     private val _progres = MutableStateFlow<String?>(null)
     val progres: StateFlow<String?> = _progres.asStateFlow()
+    // ---- Senja Memories: kenangan foto/video "pada hari ini" di tahun-tahun lalu ----
+    private val _memories = MutableStateFlow<List<BerkasArsipEntity>>(emptyList())
+    val memories: StateFlow<List<BerkasArsipEntity>> = _memories.asStateFlow()
+
+    private val _senjaMemoriesDismissed = MutableStateFlow(false)
+    val senjaMemoriesDismissed: StateFlow<Boolean> = _senjaMemoriesDismissed.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            // Aliran khusus tanpa saringan pencarian: kenangan dihitung dari
+            // seluruh arsip pribadi, bukan dari hasil cari yang sedang aktif.
+            val awal = repo.tampilanAwal()
+            combine(
+                repo.alirBerkas(awal),
+                repo.alirKoleksiImpor(),
+                koleksi,
+                koleksiTerbuka,
+            ) { daftar, impor, daftarKoleksi, dibuka ->
+                val kunciImpor = PenandaImpor.kunciImpor(impor)
+                val kunciTerkunci =
+                    daftarKoleksi.filter { it.terkunci }.map { it.kunci }.toSet()
+                daftar
+                    .filter { !PenandaImpor.milikImpor(it, kunciImpor) }
+                    .filter {
+                        it.tipe == TipeFile.GAMBAR.name || it.tipe == TipeFile.VIDEO.name
+                    }
+                    .filter { berkas ->
+                        // Berkas koleksi terkunci hanya tampil bila vault sedang terbuka.
+                        val kunci = KunciKoleksi(berkas.chatId, berkas.topicId)
+                        kunci !in kunciTerkunci || kunci in dibuka
+                    }
+            }.collect { layak ->
+                _memories.value =
+                    AturanSenjaMemories.filtering(layak, TimeZone.getDefault()).take(4)
+            }
+        }
+        viewModelScope.launch {
+            _senjaMemoriesDismissed.value = pengaturan.isSenjaMemoriesDismissed()
+        }
+    }
 
     /** Antrean popup penamaan: Buat (per tipe) dan Tarik (per entri baru). */
     private val _antreanBuat = MutableStateFlow<List<ItemPenamaan>>(emptyList())
@@ -126,7 +168,6 @@ class DasborViewModel(
             _saringan.value = repo.tampilanAwal()
         }
     }
-
     // ---- Pencarian & filter ----
 
     fun ubahKata(nilai: String) {
@@ -636,6 +677,14 @@ class DasborViewModel(
                 false
             }
             panggilBalik(cocok)
+        }
+    }
+    
+    /** Menandai bahwa kartu Senja Memories telah ditolak untuk hari ini. */
+    fun setSenjaMemoriesDismissed() {
+        viewModelScope.launch {
+            pengaturan.setSenjaMemoriesDismissed()
+            _senjaMemoriesDismissed.value = true
         }
     }
 
