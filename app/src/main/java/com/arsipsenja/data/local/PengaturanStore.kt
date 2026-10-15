@@ -129,7 +129,7 @@ class PengaturanStore(private val context: Context) {
             val semua = (p[KUNCI_GAGAL_DILAPORKAN] ?: emptySet()) + id
             // Batasi agar tidak tumbuh tanpa batas (cukup 200 terakhir).
             p[KUNCI_GAGAL_DILAPORKAN] = if (semua.size > 200) {
-                semua.takeLast(200).toSet()
+                semua.toList().takeLast(200).toSet()
             } else {
                 semua
             }
