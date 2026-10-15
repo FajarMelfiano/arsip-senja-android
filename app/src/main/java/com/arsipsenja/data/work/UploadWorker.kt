@@ -93,6 +93,14 @@ class UploadWorker(
                 } else {
                     com.arsipsenja.util.namaPotongan(namaAsli, indeks + 1)
                 }
+                // Guard idempoten: percobaan ulang setelah kiriman yang
+                // sebenarnya sudah sampai (mis. timeout tungguTerkirim yang
+                // kehilangan sinyal sukses) tidak boleh mengirim pesan baru —
+                // batch realtime sudah mengindeks kiriman pertama.
+                if (runAttemptCount > 0 && repo.sudahTerindeks(namaPotongan, potonganFile.length(), kunci.chatId)) {
+                    Log.i(tag, "Retry $runAttemptCount: $namaPotongan sudah terindeks — lewati kirim ulang.")
+                    continue
+                }
                 try {
                     val terkirim = telegram.kirimBerkas(
                         chatId = koleksi.chatId,

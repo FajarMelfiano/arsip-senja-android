@@ -81,6 +81,11 @@ class UnggahViewModel(
     val transfer: StateFlow<Map<Int, ProgresBerkas>> = _transfer.asStateFlow()
 
     init {
+        // Toggle rute otomatis persisten — baca sekali dari DataStore agar
+        // tidak mati sendiri setiap aplikasi dibuka.
+        viewModelScope.launch {
+            pengaturan.ruteOtomatis.collect { _ruteOtomatis.value = it }
+        }
         viewModelScope.launch {
             telegram.progresBerkas.collect { p ->
                 _transfer.update { peta ->
@@ -162,6 +167,7 @@ class UnggahViewModel(
 
     fun setRuteOtomatis(aktif: Boolean) {
         _ruteOtomatis.value = aktif
+        viewModelScope.launch { pengaturan.setRuteOtomatis(aktif) }
     }
 
     /**

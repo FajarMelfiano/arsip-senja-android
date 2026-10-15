@@ -98,6 +98,13 @@ class PengaturanStore(private val context: Context) {
         store.edit { it[KUNCI_BIOMETRIK] = aktif }
     }
 
+    /** Toggle "Rute otomatis (ikut kategori)" di layar Unggah — persisten antar buka aplikasi. */
+    val ruteOtomatis: Flow<Boolean> = store.data.map { p -> p[KUNCI_RUTE_OTOMATIS] ?: false }
+
+    suspend fun setRuteOtomatis(aktif: Boolean) {
+        store.edit { it[KUNCI_RUTE_OTOMATIS] = aktif }
+    }
+
     suspend fun perluBiometrik(): Boolean = biometrikAktif.first()
 
     suspend fun tampilanSekarang(): TampilanDasbor = tampilanDasbor.first()
@@ -180,6 +187,7 @@ class PengaturanStore(private val context: Context) {
         val KUNCI_VAULT = longPreferencesKey("vault_chat_id")
         val KUNCI_SINKRON_TERAKHIR = longPreferencesKey("sinkron_terakhir")
         val KUNCI_GAGAL_DILAPORKAN = stringSetPreferencesKey("notifikasi_gagal_unggah")
+        val KUNCI_RUTE_OTOMATIS = booleanPreferencesKey("rute_otomatis")
         const val KUNCI_API_ID = "telegram_api_id"
         const val KUNCI_API_HASH = "telegram_api_hash"
         const val KUNCI_DB = "kunci_db_tdlib"

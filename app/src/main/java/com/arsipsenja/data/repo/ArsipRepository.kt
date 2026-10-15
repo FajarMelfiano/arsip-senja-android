@@ -1428,6 +1428,22 @@ class ArsipRepository(
         koleksiDao.hitungUlang(kunci.chatId, kunci.topicId)
     }
 
+    /**
+     * True bila berkas bernama [nama] berukuran [ukuran] untuk chat [chatId]
+     * sudah terindeks dalam [jendelaMs] terakhir. Guard idempoten untuk
+     * retry [UploadWorker]: kiriman yang sebenarnya sudah sampai ke Telegram
+     * (terindeks oleh batch realtime) tidak dikirim ulang sebagai pesan baru.
+     * Hanya dipakai saat runAttemptCount > 0 — unggahan baru dari pengguna
+     * selalu dikirim.
+     */
+    suspend fun sudahTerindeks(
+        nama: String,
+        ukuran: Long,
+        chatId: Long,
+        jendelaMs: Long = 90L * 60L * 1000L,
+    ): Boolean =
+        berkasDao.hitungMirip(nama, ukuran, chatId, System.currentTimeMillis() - jendelaMs) > 0
+
     suspend fun hapusBerkas(berkasId: String) {
         berkasDao.hapus(berkasId)
     }

@@ -49,7 +49,15 @@ class TelegramClient(
     )
     val progresBerkas: SharedFlow<ProgresBerkas> = _progres.asSharedFlow()
 
+    /**
+     * Replay agar [tungguTerkirim] yang mulai mengoleksi belakangan tidak
+     * kehilangan updateMessageSendSucceeded yang sudah terbit duluan —
+     * tanpa ini, pesan yang sebenarnya sudah terkirim dianggap timeout
+     * (30 mnt) lalu worker retry dan MENGIRIM ULANG berkas yang sama
+     * (duplikat di Telegram + indeks ganda).
+     */
     private val _pesanTerkirim = MutableSharedFlow<PesanTerkirim>(
+        replay = 64,
         extraBufferCapacity = 32,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )

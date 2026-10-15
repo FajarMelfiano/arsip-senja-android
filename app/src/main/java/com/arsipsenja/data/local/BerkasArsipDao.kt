@@ -59,6 +59,21 @@ interface BerkasArsipDao {
     @Query("SELECT id FROM berkas_arsip")
     suspend fun semuaId(): List<String>
 
+    /**
+     * Hitung baris dengan nama + ukuran + chat yang sama dalam jendela
+     * waktu. Dipakai guard idempoten retry [UploadWorker]: kiriman yang
+     * sebenarnya sudah sampai (terindeks batch realtime) tidak dikirim ulang.
+     */
+    @Query(
+        """
+        SELECT COUNT(*) FROM berkas_arsip
+        WHERE nama = :nama AND ukuran = :ukuran
+          AND (koleksiId = :chatId OR chatId = :chatId)
+          AND dibuatPada > :sejak
+        """,
+    )
+    suspend fun hitungMirip(nama: String, ukuran: Long, chatId: Long, sejak: Long): Int
+
     @Upsert
     suspend fun simpan(berkas: BerkasArsipEntity)
 
