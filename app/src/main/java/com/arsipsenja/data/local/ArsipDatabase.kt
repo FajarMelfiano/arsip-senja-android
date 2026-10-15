@@ -177,10 +177,24 @@ val MIGRASI_5_6 = object : Migration(5, 6) {
         )
     }
 }
+val MIGRASI_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE `upload_queue_pause` (
+                `workId` TEXT NOT NULL,
+                `isPaused` INTEGER NOT NULL DEFAULT 0,
+                `priority` INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(`workId`)
+            )
+            """.trimIndent()
+        )
+    }
+}
 
 @Database(
-    entities = [BerkasArsipEntity::class, KoleksiEntity::class, TautanEntity::class],
-    version = 6,
+    entities = [BerkasArsipEntity::class, KoleksiEntity::class, TautanEntity::class, UploadQueuePauseEntity::class],
+    version = 7,
     exportSchema = true,
 )
 abstract class ArsipDatabase : RoomDatabase() {
@@ -188,6 +202,7 @@ abstract class ArsipDatabase : RoomDatabase() {
     abstract fun berkasDao(): BerkasArsipDao
     abstract fun koleksiDao(): KoleksiDao
     abstract fun tautanDao(): TautanDao
+    abstract fun uploadQueuePauseDao(): UploadQueuePauseDao
 
     companion object {
         @Volatile
@@ -206,6 +221,7 @@ abstract class ArsipDatabase : RoomDatabase() {
                         MIGRASI_3_4,
                         MIGRASI_4_5,
                         MIGRASI_5_6,
+                        MIGRASI_6_7,
                     )
                     .build()
                     .also { instance = it }
