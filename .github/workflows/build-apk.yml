@@ -2,7 +2,9 @@ name: Build APK
 
 on:
   push:
-    branches: ["main", "master"]
+    # Branch kerja perlu umpan balik juga, bukan hanya main. Tanpa ini
+    # hardening branch bisa terpush tanpa pernah diuji CI sama sekali.
+    branches: ["main", "master", "hardening-v2"]
   pull_request:
   workflow_dispatch:
 
