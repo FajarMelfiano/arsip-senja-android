@@ -57,11 +57,11 @@ class UploadWorker(
             // maupun reboot. Selama dijeda, worker keluar via Result.retry() —
             // WorkManager menjadwalkannya ulang dengan backoff, dan unggahan
             // TIDAK berjalan sampai pengguna menekan "lanjutkan".
+            // Status jeda sudah terekspos ke UI lewat Room (amatiJedaUnggah),
+            // jadi tidak perlu outputData tambahan di sini.
             if (repo.sedangJeda(workId)) {
-                setOutputData(workDataOf(K_PAUSED to "true"))
                 return Result.retry()
             }
-            setOutputData(workDataOf(K_PAUSED to "false"))
             kerjakan()
         } catch (e: kotlinx.coroutines.CancellationException) {
             // Pembatalan harus diteruskan apa adanya, bukan jadi FAILED.
@@ -386,9 +386,6 @@ class UploadWorker(
 
         /** Kunci outputData untuk pesan galat terminal (dibaca UI antrean). */
         const val K_PESAN_GALAT = "pesanGalat"
-
-        /** Kunci outputData untuk status jeda ("true"/"false"; dibaca UI antrean). */
-        const val K_PAUSED = "paused"
 
         /** Id topik forum tujuan; 0 = channel lama / tanpa topik. */
         const val K_TOPIK = "topicId"

@@ -17,6 +17,7 @@ import com.arsipsenja.data.local.KunciKoleksi
 import com.arsipsenja.data.local.KunciRahasia
 import com.arsipsenja.data.local.PengaturanStore
 import com.arsipsenja.data.local.PenandaImpor
+import com.arsipsenja.data.local.UploadQueuePauseEntity
 import com.arsipsenja.data.local.StatistikBerkas
 import com.arsipsenja.data.local.TautanEntity
 import com.arsipsenja.data.local.TipeKunci
@@ -70,7 +71,7 @@ class ArsipRepository(
 
     private val tag = "ArsipRepository"
     private val berkasDao = db.berkasDao()
-    private val pauseDao = db.pauseDao
+    private val pauseDao = db.uploadQueuePauseDao()
     private val koleksiDao = db.koleksiDao()
     private val tautanDao = db.tautanDao()
 
