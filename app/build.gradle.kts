@@ -90,6 +90,14 @@ android {
     }
 }
 
+// Skema Room diekspor ke app/schemas/<versi>.json setiap kali KSP berjalan.
+// Tanpa ini, MigrationTestHelper tidak punya sumber kebenaran untuk memverifikasi
+// bahwa migrasi menghasilkan skema yang sama dengan yang mendeklarasikan entity.
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+    arg("room.incremental", "true")
+}
+
 kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
@@ -135,6 +143,10 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.truth)
     testImplementation(libs.kotlinx.coroutines.test)
+    // MigrationTestHelper memverifikasi migrasi Room terhadap skema yang
+    // benar-benar diekspor, bukan sekadar SQL yang ditulis tangan.
+    testImplementation(libs.androidx.room.testing)
+    testImplementation(libs.androidx.work.testing)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)

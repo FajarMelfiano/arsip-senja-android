@@ -2,6 +2,10 @@ package com.arsipsenja.data.telegram
 
 import com.arsipsenja.data.local.BerkasArsipEntity
 import com.arsipsenja.util.TipeFile
+import com.arsipsenja.util.bacaInfoPotongan
+import com.arsipsenja.util.captionTanpaHeader
+import com.arsipsenja.util.namaAsliDariPotongan
+import com.arsipsenja.util.uraiHeaderArsip
 import org.drinkless.tdlib.TdApi
 
 /** Ringkasan berkas yang diekstrak dari satu pesan Telegram. */
@@ -127,8 +131,15 @@ fun BerkasMentah.keEntity(
     topicId: Int = 0,
     nomorKatalog: Int,
     sekarang: Long,
-): BerkasArsipEntity =
-    BerkasArsipEntity(
+): BerkasArsipEntity {
+    // Metadata kelompok dan integritas berasal dari header caption bila ada.
+    // Arsip lama tidak memilikinya; untuk berkas seperti itu indeks potongan
+    // ditebak dari nama berkas, sedangkan jumlah potongan dibiarkan 0 karena
+    // memang tidak diketahui — lebih baik kosong daripada dikarang.
+    val header = uraiHeaderArsip(caption)
+    val infoLama = if (header == null) bacaInfoPotongan(nama) else null
+
+    return BerkasArsipEntity(
         id = BerkasArsipEntity.kunci(chatId, messageId),
         messageId = messageId,
         chatId = chatId,
@@ -144,6 +155,14 @@ fun BerkasMentah.keEntity(
         tdLocalPath = tdLocalPath,
         tdThumbFileId = tdThumbFileId,
         thumbPath = null,
-        deskripsi = caption?.takeIf { it.isNotBlank() },
+        deskripsi = captionTanpaHeader(caption),
         dibuatPada = sekarang,
+        hashSha256 = header?.hashSha256,
+        grupId = header?.grupId,
+        indeksPotongan = header?.indeksPotongan ?: infoLama?.indeks ?: 0,
+        jumlahPotongan = header?.jumlahPotongan ?: 0,
+        namaAsli = header?.namaAsli
+            ?: infoLama?.let { namaAsliDariPotongan(nama) },
+        ukuranTotal = header?.ukuranTotal ?: 0L,
     )
+}

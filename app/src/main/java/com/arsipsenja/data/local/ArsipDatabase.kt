@@ -104,10 +104,84 @@ val MIGRASI_4_5 = object : Migration(4, 5) {
     }
 }
 
+/**
+ * Migrasi 5 -> 6: integritas, kelompok potongan, dan rekonsiliasi.
+ *
+ * ## Kolom baru pada `berkas_arsip`
+ *
+ * Seluruhnya **additive** dengan nilai bawaan, jadi tidak ada baris yang hilang
+ * dan tidak ada nilai lama yang berubah makna:
+ *
+ * - `hashSha256`, `grupId`, `indeksPotongan`, `jumlahPotongan`, `namaAsli`,
+ *   `ukuranTotal` — cermin header caption. NULL/0 untuk arsip lama, yang
+ *   memang belum punya metadata tersebut.(sum them later)
+ * - `statusSinkron` — 0 = masih conforms with Telegram.
+ * - `sudahDiverifikasi` — 0 = hash belum dicocokkan.
+ *
+ * Kolom ini sengaja dapat di-backfill: setelah sinkron penuh berikutnya,
+ * setiap baris yang punya header caption terisi. Baris tanpa header (arsip
+ * lama) tetap null dan diperlakukan sebagai "tidak punya hash" — bukan error.
+ *
+ * ## Indeks baru
+ *
+ * Tanpa ini, `tipe`/`ukuran`/`hashSha256`/`grupId`/`statusSinkron` hanya bisa
+ * dijawab dengan pemindaian penuh tabel, dan pengurutan `nama COLLATE NOCASE`
+ * tidak bisa memakai indeks (indeks bawaan BINARY).
+ *
+ * Ekspansi indeks `koleksiId, topicId` menjadi `koleksiId, topicId, tanggal`
+ * menutup query paling sering dipakai: daftar berkas satu koleksi terurut
+ * tanggal. Indeks lama tetap dipertahankan karena pola `koleksiId = ?` tanpa
+ * tanggal masih dipakai filter dasbor.
+ */
+val MIGRASI_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `berkas_arsip` ADD COLUMN `hashSha256` TEXT")
+        db.execSQL("ALTER TABLE `berkas_arsip` ADD COLUMN `grupId` TEXT")
+        db.execSQL(
+            "ALTER TABLE `berkas_arsip` ADD COLUMN `indeksPotongan` INTEGER NOT NULL DEFAULT 0"
+        )
+        db.execSQL(
+            "ALTER TABLE `berkas_arsip` ADD COLUMN `jumlahPotongan` INTEGER NOT NULL DEFAULT 0"
+        )
+        db.execSQL("ALTER TABLE `berkas_arsip` ADD COLUMN `namaAsli` TEXT")
+        db.execSQL(
+            "ALTER TABLE `berkas_arsip` ADD COLUMN `ukuranTotal` INTEGER NOT NULL DEFAULT 0"
+        )
+        db.execSQL(
+            "ALTER TABLE `berkas_arsip` ADD COLUMN `statusSinkron` INTEGER NOT NULL DEFAULT 0"
+        )
+        db.execSQL(
+            "ALTER TABLE `berkas_arsip` ADD COLUMN `sudahDiverifikasi` INTEGER NOT NULL DEFAULT 0"
+        )
+
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_berkas_arsip_koleksiId_topicId_tanggal` " +
+                "ON `berkas_arsip` (`koleksiId`, `topicId`, `tanggal`)"
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_berkas_arsip_tipe` ON `berkas_arsip` (`tipe`)"
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_berkas_arsip_ukuran` ON `berkas_arsip` (`ukuran`)"
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_berkas_arsip_hashSha256` " +
+                "ON `berkas_arsip` (`hashSha256`)"
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_berkas_arsip_grupId` ON `berkas_arsip` (`grupId`)"
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_berkas_arsip_statusSinkron` " +
+                "ON `berkas_arsip` (`statusSinkron`)"
+        )
+    }
+}
+
 @Database(
     entities = [BerkasArsipEntity::class, KoleksiEntity::class, TautanEntity::class],
-    version = 5,
-    exportSchema = false,
+    version = 6,
+    exportSchema = true,
 )
 abstract class ArsipDatabase : RoomDatabase() {
 
@@ -126,7 +200,13 @@ abstract class ArsipDatabase : RoomDatabase() {
                     ArsipDatabase::class.java,
                     "arsip-senja.db",
                 )
-                    .addMigrations(MIGRASI_1_2, MIGRASI_2_3, MIGRASI_3_4, MIGRASI_4_5)
+                    .addMigrations(
+                        MIGRASI_1_2,
+                        MIGRASI_2_3,
+                        MIGRASI_3_4,
+                        MIGRASI_4_5,
+                        MIGRASI_5_6,
+                    )
                     .build()
                     .also { instance = it }
             }

@@ -80,3 +80,142 @@ fun pecahBerkas(
     }
     return hasil
 }
+
+/**
+ * Berapa banyak potongan yang dihasilkan untuk berkas sepanjang [ukuran].
+ *
+ * Dipakai sebelum memulai unggahan agar jumlah potongan bisa ditulis ke header
+ * caption (field `i=indeks/jumlah`) tanpa perlu membuat berkas apa pun.
+ */
+fun jumlahPotongan(ukuran: Long, batas: Long = BATAS_POTONGAN): Int {
+    require(batas > 0) { "batas harus positif" }
+    require(ukuran >= 0) { "ukuran tidak boleh negatif" }
+    if (ukuran <= batas) return 1
+    // Pembulatan ke atas agar berkas tepat di batas tidak terpecah.
+    return ((ukuran + batas - 1) / batas).toInt()
+}
+
+/**
+ * Pecah [sumber] **secara berurutan**: satu potongan dibuat, diserahkan ke
+ * [onPotongan], lalu dihapus sebelum potongan berikutnya dibuat.
+ *
+ * Ini melengkapi [pecahBerkas] untuk jalur unggah, karena [pecahBerkas] menulis
+ * seluruh potongan lebih dulu — untuk berkas 6 GB berarti ~12 GB peak di
+ * `cacheDir` (asli + semua potongan) sebelum sumber dihapus. Versi ini
+ * menyimpan hanya satu potongan pada satu waktu.
+ *
+ * Nomor urut dimulai dari 1. [onPotongan] dipanggil dengan
+ * `(berkas, indeks, jumlah)`. Bila [onPotongan] melempar galat, proses berhenti
+ * dan potongan yang sedang ada dihapus.
+ *
+ * @param hapusSetelah bila true, potongan dihapus setelah [onPotongan] selesai.
+ * @throws java.io.IOException bila direktori tak bisa ditulis.
+ */
+@JvmOverloads
+fun pecahBerturutan(
+    sumber: File,
+    direktori: File,
+    batas: Long = BATAS_POTONGAN,
+    buffer: Int = BUFFER_PEMECAH,
+    hapusSetelah: Boolean = false,
+    onPotongan: (File, Int, Int) -> Unit,
+) {
+    require(batas > 0) { "batas harus positif" }
+    require(buffer > 0) { "buffer harus positif" }
+    if (!sumber.isFile) throw java.io.IOException("Berkas sumber tidak ada: $sumber")
+
+    val panjang = sumber.length()
+    val total = jumlahPotongan(panjang, batas)
+    if (total <= 1) {
+        onPotongan(sumber, 1, 1)
+        return
+    }
+    require(direktori.isDirectory || direktori.mkdirs()) {
+        "Direktori tujuan tidak bisa dibuat: $direktori"
+    }
+
+    RandomAccessFile(sumber, "r").use { src ->
+        val buf = ByteArray(buffer)
+        var potonganKe = 1
+        while (src.filePointer < panjang) {
+            val ukuranPotongan = minOf(batas, panjang - src.filePointer)
+            val target = File(direktori, namaPotongan(sumber.name, potonganKe))
+            try {
+                RandomAccessFile(target, "rw").use { dst ->
+                    dst.setLength(ukuranPotongan)
+                    var sisa = ukuranPotongan
+                    while (sisa > 0) {
+                        val baca = minOf(buf.size.toLong(), sisa).toInt()
+                        src.readFully(buf, 0, baca)
+                        dst.write(buf, 0, baca)
+                        sisa -= baca
+                    }
+                }
+                onPotongan(target, potonganKe, total)
+            } catch (e: Throwable) {
+                target.delete()
+                throw e
+            }
+            if (hapusSetelah) target.delete()
+            potonganKe += 1
+        }
+    }
+}
+
+/** Nomor potongan yang tersimpan dalam nama berkas, atau null bila bukan potongan. */
+data class InfoPotongan(val indeks: Int, val jumlah: Int?)
+
+/** Pola `nama.part<angka><_opsional jumlah>.ekstensi`, maksimal 9 digit per angka. */
+private val POLA_POTONGAN = Regex(""".+\.part(\d{1,9})(\d{0,9})(?:\.[^.]*)?$""")
+
+/**
+ * Baca nomor potongan dari nama berkas seperti `lapor.part3.pdf`.
+ *
+ * Hanya dipakai untuk mengarsipkan ulang berkas lama yang belum memakai header
+ * caption. Berkas baru **tidak** bergantung pada nama — grup dan urutan diambil
+ * dari header, sehingga nama bebas diubah.
+ *
+ * Angka dibaca dengan batas 9 digit agar `part10` tidak tertukar dengan
+ * `part1` diikuti karakter lain.
+ */
+fun bacaInfoPotongan(namaBerkas: String): InfoPotongan? {
+    val cocok = POLA_POTONGAN.matchEntire(namaBerkas) ?: return null
+    val indeks = cocok.groupValues[1].trimStart('0').ifEmpty { "0" }.toIntOrNull() ?: return null
+    if (indeks < 1) return null
+    val jumlah = cocok.groupValues[2]
+        .takeIf { it.isNotEmpty() }
+        ?.let { it.trimStart('0').ifEmpty { "0" }.toIntOrNull() }
+    return InfoPotongan(indeks, jumlah)
+}
+
+/**
+ * Kembalikan nama berkas **asli** dari nama potongan.
+ *
+ * `lapor.part2.pdf` → `lapor.pdf`. Berguna untuk mengarsipkan ulang berkas lama
+ * yang belum punya header caption, sehingga semua potongannya bisa ditampilkan
+ * dengan nama yang sama seperti aslinya.
+ *
+ * @return nama asli, atau null bila [namaBerkas] bukan nama potongan.
+ */
+fun namaAsliDariPotongan(namaBerkas: String): String? {
+    val info = bacaInfoPotongan(namaBerkas) ?: return null
+    val titik = namaBerkas.lastIndexOf('.')
+    val ekstensi = if (titik > 0) namaBerkas.substring(titik) else ""
+    return namaBerkas.substring(0, titik).removeSuffix(".part${info.indeks}") + ekstensi
+}
+
+/**
+ * Urutkan nama berkas potongan secara **numerik** menurut nomor bagian.
+ *
+ * Pengurutan leksikografis keliru: `part10` mendahului `part2`. Nama yang bukan
+ * potongan diletakkan di akhir tanpa diubah urutannya.
+ */
+fun urutkanNamaPotongan(nama: Iterable<String>): List<String> {
+    val potongan = mutableListOf<Pair<String, Int>>()
+    val lainnya = mutableListOf<String>()
+    for (n in nama) {
+        val info = bacaInfoPotongan(n)
+        if (info == null) lainnya += n else potongan += n to info.indeks
+    }
+    return potongan.sortedBy { it.second }.map { it.first } + lainnya
+}

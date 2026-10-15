@@ -1,0 +1,512 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 6,
+    "identityHash": "f40c8cc764788fa15e4e328d58b7d3a1",
+    "entities": [
+      {
+        "tableName": "berkas_arsip",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `messageId` INTEGER NOT NULL, `chatId` INTEGER NOT NULL, `koleksiId` INTEGER, `topicId` INTEGER NOT NULL, `nama` TEXT NOT NULL, `ukuran` INTEGER NOT NULL, `tanggal` INTEGER NOT NULL, `mime` TEXT NOT NULL, `tipe` TEXT NOT NULL, `nomorKatalog` INTEGER NOT NULL DEFAULT 0, `tdFileId` INTEGER NOT NULL, `tdLocalPath` TEXT, `tdThumbFileId` INTEGER NOT NULL DEFAULT 0, `thumbPath` TEXT, `deskripsi` TEXT, `dibuatPada` INTEGER NOT NULL, `hashSha256` TEXT DEFAULT NULL, `grupId` TEXT DEFAULT NULL, `indeksPotongan` INTEGER NOT NULL DEFAULT 0, `jumlahPotongan` INTEGER NOT NULL DEFAULT 0, `namaAsli` TEXT DEFAULT NULL, `ukuranTotal` INTEGER NOT NULL DEFAULT 0, `statusSinkron` INTEGER NOT NULL DEFAULT 0, `sudahDiverifikasi` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "messageId",
+            "columnName": "messageId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "chatId",
+            "columnName": "chatId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "koleksiId",
+            "columnName": "koleksiId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "topicId",
+            "columnName": "topicId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nama",
+            "columnName": "nama",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ukuran",
+            "columnName": "ukuran",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tanggal",
+            "columnName": "tanggal",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mime",
+            "columnName": "mime",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tipe",
+            "columnName": "tipe",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nomorKatalog",
+            "columnName": "nomorKatalog",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "tdFileId",
+            "columnName": "tdFileId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tdLocalPath",
+            "columnName": "tdLocalPath",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "tdThumbFileId",
+            "columnName": "tdThumbFileId",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "thumbPath",
+            "columnName": "thumbPath",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "deskripsi",
+            "columnName": "deskripsi",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "dibuatPada",
+            "columnName": "dibuatPada",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hashSha256",
+            "columnName": "hashSha256",
+            "affinity": "TEXT",
+            "notNull": false,
+            "defaultValue": "NULL"
+          },
+          {
+            "fieldPath": "grupId",
+            "columnName": "grupId",
+            "affinity": "TEXT",
+            "notNull": false,
+            "defaultValue": "NULL"
+          },
+          {
+            "fieldPath": "indeksPotongan",
+            "columnName": "indeksPotongan",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "jumlahPotongan",
+            "columnName": "jumlahPotongan",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "namaAsli",
+            "columnName": "namaAsli",
+            "affinity": "TEXT",
+            "notNull": false,
+            "defaultValue": "NULL"
+          },
+          {
+            "fieldPath": "ukuranTotal",
+            "columnName": "ukuranTotal",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "statusSinkron",
+            "columnName": "statusSinkron",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "sudahDiverifikasi",
+            "columnName": "sudahDiverifikasi",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_berkas_arsip_chatId",
+            "unique": false,
+            "columnNames": [
+              "chatId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_berkas_arsip_chatId` ON `${TABLE_NAME}` (`chatId`)"
+          },
+          {
+            "name": "index_berkas_arsip_koleksiId",
+            "unique": false,
+            "columnNames": [
+              "koleksiId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_berkas_arsip_koleksiId` ON `${TABLE_NAME}` (`koleksiId`)"
+          },
+          {
+            "name": "index_berkas_arsip_koleksiId_topicId",
+            "unique": false,
+            "columnNames": [
+              "koleksiId",
+              "topicId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_berkas_arsip_koleksiId_topicId` ON `${TABLE_NAME}` (`koleksiId`, `topicId`)"
+          },
+          {
+            "name": "index_berkas_arsip_koleksiId_topicId_tanggal",
+            "unique": false,
+            "columnNames": [
+              "koleksiId",
+              "topicId",
+              "tanggal"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_berkas_arsip_koleksiId_topicId_tanggal` ON `${TABLE_NAME}` (`koleksiId`, `topicId`, `tanggal`)"
+          },
+          {
+            "name": "index_berkas_arsip_nama",
+            "unique": false,
+            "columnNames": [
+              "nama"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_berkas_arsip_nama` ON `${TABLE_NAME}` (`nama`)"
+          },
+          {
+            "name": "index_berkas_arsip_tanggal",
+            "unique": false,
+            "columnNames": [
+              "tanggal"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_berkas_arsip_tanggal` ON `${TABLE_NAME}` (`tanggal`)"
+          },
+          {
+            "name": "index_berkas_arsip_tipe",
+            "unique": false,
+            "columnNames": [
+              "tipe"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_berkas_arsip_tipe` ON `${TABLE_NAME}` (`tipe`)"
+          },
+          {
+            "name": "index_berkas_arsip_ukuran",
+            "unique": false,
+            "columnNames": [
+              "ukuran"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_berkas_arsip_ukuran` ON `${TABLE_NAME}` (`ukuran`)"
+          },
+          {
+            "name": "index_berkas_arsip_hashSha256",
+            "unique": false,
+            "columnNames": [
+              "hashSha256"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_berkas_arsip_hashSha256` ON `${TABLE_NAME}` (`hashSha256`)"
+          },
+          {
+            "name": "index_berkas_arsip_grupId",
+            "unique": false,
+            "columnNames": [
+              "grupId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_berkas_arsip_grupId` ON `${TABLE_NAME}` (`grupId`)"
+          },
+          {
+            "name": "index_berkas_arsip_statusSinkron",
+            "unique": false,
+            "columnNames": [
+              "statusSinkron"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_berkas_arsip_statusSinkron` ON `${TABLE_NAME}` (`statusSinkron`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "koleksi",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`chatId` INTEGER NOT NULL, `topicId` INTEGER NOT NULL, `nama` TEXT NOT NULL, `deskripsi` TEXT, `label` TEXT DEFAULT NULL, `warna` INTEGER NOT NULL DEFAULT 0, `tipeFile` TEXT NOT NULL DEFAULT '', `kunciTipe` TEXT NOT NULL DEFAULT 'TIDAK_ADA', `kunciGaram` TEXT DEFAULT NULL, `kunciHash` TEXT DEFAULT NULL, `kunciBiometrik` INTEGER NOT NULL DEFAULT 0, `asalImpor` INTEGER NOT NULL DEFAULT 0, `jumlahBerkas` INTEGER NOT NULL, `dibuatPada` INTEGER NOT NULL, `terakhirSinkron` INTEGER NOT NULL, PRIMARY KEY(`chatId`, `topicId`))",
+        "fields": [
+          {
+            "fieldPath": "chatId",
+            "columnName": "chatId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "topicId",
+            "columnName": "topicId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nama",
+            "columnName": "nama",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deskripsi",
+            "columnName": "deskripsi",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "label",
+            "columnName": "label",
+            "affinity": "TEXT",
+            "notNull": false,
+            "defaultValue": "NULL"
+          },
+          {
+            "fieldPath": "warna",
+            "columnName": "warna",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "tipeFile",
+            "columnName": "tipeFile",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "''"
+          },
+          {
+            "fieldPath": "kunciTipe",
+            "columnName": "kunciTipe",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'TIDAK_ADA'"
+          },
+          {
+            "fieldPath": "kunciGaram",
+            "columnName": "kunciGaram",
+            "affinity": "TEXT",
+            "notNull": false,
+            "defaultValue": "NULL"
+          },
+          {
+            "fieldPath": "kunciHash",
+            "columnName": "kunciHash",
+            "affinity": "TEXT",
+            "notNull": false,
+            "defaultValue": "NULL"
+          },
+          {
+            "fieldPath": "kunciBiometrik",
+            "columnName": "kunciBiometrik",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "asalImpor",
+            "columnName": "asalImpor",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "jumlahBerkas",
+            "columnName": "jumlahBerkas",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dibuatPada",
+            "columnName": "dibuatPada",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "terakhirSinkron",
+            "columnName": "terakhirSinkron",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "chatId",
+            "topicId"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "tautan",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `berkasId` TEXT, `chatId` INTEGER NOT NULL, `messageId` INTEGER NOT NULL, `url` TEXT NOT NULL, `jenis` TEXT NOT NULL, `label` TEXT NOT NULL, `dibuatPada` INTEGER NOT NULL, `dicabut` INTEGER NOT NULL, FOREIGN KEY(`berkasId`) REFERENCES `berkas_arsip`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "berkasId",
+            "columnName": "berkasId",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "chatId",
+            "columnName": "chatId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "messageId",
+            "columnName": "messageId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "url",
+            "columnName": "url",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "jenis",
+            "columnName": "jenis",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "label",
+            "columnName": "label",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dibuatPada",
+            "columnName": "dibuatPada",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dicabut",
+            "columnName": "dicabut",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_tautan_berkasId",
+            "unique": false,
+            "columnNames": [
+              "berkasId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_tautan_berkasId` ON `${TABLE_NAME}` (`berkasId`)"
+          },
+          {
+            "name": "index_tautan_chatId",
+            "unique": false,
+            "columnNames": [
+              "chatId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_tautan_chatId` ON `${TABLE_NAME}` (`chatId`)"
+          },
+          {
+            "name": "index_tautan_url",
+            "unique": true,
+            "columnNames": [
+              "url"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_tautan_url` ON `${TABLE_NAME}` (`url`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "berkas_arsip",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "berkasId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      }
+    ],
+    "views": [],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'f40c8cc764788fa15e4e328d58b7d3a1')"
+    ]
+  }
+}

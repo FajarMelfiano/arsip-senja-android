@@ -94,4 +94,127 @@ interface BerkasArsipDao {
 
     @Query("DELETE FROM berkas_arsip WHERE id = :id")
     suspend fun hapus(id: String)
+
+    // =====================================================================
+    // Integritas & duplikat
+    // =====================================================================
+
+    /**
+     * Cari berkas lain di vault yang punya hash isi sama persis.
+     *
+     * Inilah yang membuat arsip *content-addressed*: bila pengguna mengunggah
+     * berkas yang sama dua kali, kiriman kedua bisa dikenali dan pengguna
+     * diberi tahu alih-alih menyimpan dua salinan.
+     *
+     * @param kecualikanId id berkas saat ini; agar berkas tidak mencocoki diri sendiri.
+     */
+    @Query(
+        """
+        SELECT * FROM berkas_arsip
+        WHERE hashSha256 = :hash AND id != :kecualikanId
+        LIMIT 1
+        """,
+    )
+    suspend fun cariDuplikatHash(hash: String, kecualikanId: String): BerkasArsipEntity?
+
+    /** Apakah hash ini sudah ada di vault? Dipakai guard sebelum mengunggah. */
+    @Query("SELECT COUNT(*) FROM berkas_arsip WHERE hashSha256 = :hash")
+    suspend fun jumlahHash(hash: String): Int
+
+    /** Baris yang punya hash tetapi belum pernah diverifikasi isinya. */
+    @Query("SELECT * FROM berkas_arsip WHERE hashSha256 IS NOT NULL AND sudahDiverifikasi = 0 LIMIT :batas")
+    suspend fun ambilBelumTerverifikasi(batas: Int): List<BerkasArsipEntity>
+
+    @Query("UPDATE berkas_arsip SET sudahDiverifikasi = :ya WHERE id = :id")
+    suspend fun tandaiTerverifikasi(id: String, ya: Boolean)
+
+    @Query("UPDATE berkas_arsip SET sudahDiverifikasi = 0 WHERE hashSha256 IS NOT NULL AND sudahDiverifikasi = 1")
+    suspend fun resetVerifikasi(): Int
+
+    // =====================================================================
+    // Kelompok potongan (berkas besar)
+    // =====================================================================
+
+    /** Semua potongan milik satu kelompok, terurut indeks. */
+    @Query("SELECT * FROM berkas_arsip WHERE grupId = :grupId AND grupId IS NOT NULL ORDER BY indeksPotongan ASC")
+    suspend fun ambilGrup(grupId: String): List<BerkasArsipEntity>
+
+    /** Apakah kelompok ini sudah lengkapterisi di vault? */
+    @Query("SELECT COUNT(*) FROM berkas_arsip WHERE grupId = :grupId")
+    suspend fun jumlahPotonganGrup(grupId: String): Int
+
+    // =====================================================================
+    // Rekonsiliasi: penyelarasan Room dengan isi sebenarnya di Telegram
+    // =====================================================================
+
+    /**
+     * Tandai seluruh baris satu koleksi sebagai "perlu dipastikan" (1).
+     *
+     * Dipakai sebagai langkah pertama rekonsiliasi. Baris yang benar-benar
+     * masih ada di Telegram akan dikembalikan ke 0 saat pesannya ditemukan
+     * dalam penyapuan; sisa yang bernilai 1 inilah yang hilang.
+     *
+     * Pendekatan **tandai-lalu-sapu** dipilih karena tidak butuh daftar `IN`
+     * yang bisa berisi puluhan ribu id — biayanya tetap O(jumlah pesan),
+     * bukan O(jumlah baris arsip).
+     */
+    @Query(
+        """
+        UPDATE berkas_arsip SET statusSinkron = 1
+        WHERE koleksiId = :koleksiId AND topicId = :topicId
+        """,
+    )
+    suspend fun tandaiPerluDicek(koleksiId: Long, topicId: Int): Int
+
+    /** Kembalikan satu baris ke status "pasti masih ada" (0). */
+    @Query("UPDATE berkas_arsip SET statusSinkron = 0 WHERE id = :id")
+    suspend fun tandaiMasihAda(id: String)
+
+    /** How many rows yang setelah penyapuan tetap bernilai 1 → hilang. */
+    @Query(
+        """
+        SELECT COUNT(*) FROM berkas_arsip
+        WHERE statusSinkron = 1 AND koleksiId = :koleksiId AND topicId = :topicId
+        """,
+    )
+    suspend fun jumlahHilang(koleksiId: Long, topicId: Int): Int
+
+    /** Baris yang hilang, untuk ditampilkan/dipilih pengguna. */
+    @Query("SELECT * FROM berkas_arsip WHERE statusSinkron = 1 ORDER BY tanggal DESC LIMIT :batas")
+    fun alirHilang(batas: Int): Flow<List<BerkasArsipEntity>>
+
+    /** Jumlah baris yang hilang di seluruh vault. */
+    @Query("SELECT COUNT(*) FROM berkas_arsip WHERE statusSinkron = 1")
+    fun alirJumlahHilang(): Flow<Int>
+
+    /** Buang permanen baris hilang yang sudah tidak punya berkas lokal. */
+    @Query("DELETE FROM berkas_arsip WHERE statusSinkron = 1 AND tdLocalPath IS NULL")
+    suspend fun hapusHilangTanpaSalinan(): Int
+
+    // =====================================================================
+    // Sinkron: high-water-mark
+    // =====================================================================
+
+    /**
+     * Message id tertinggi yang sudah terindeks untuk satu koleksi.
+     *
+     * Telegram memberi message id yang selalu menaik per chat, jadi message
+     * baru di koleksi ini pasti lebih besar dari nilai ini. Ini menggantikan
+     * `semuaId()` yang menyedot seluruh tabel setiap penyapuan.
+     */
+    @Query(
+        """
+        SELECT MAX(messageId) FROM berkas_arsip
+        WHERE koleksiId = :koleksiId AND topicId = :topicId
+        """,
+    )
+    suspend fun messageIdTertinggi(koleksiId: Long, topicId: Int): Long?
+
+    /** Apakah id ini sudah terindeks? Menggantikan pemindaian seluruh tabel. */
+    @Query("SELECT EXISTS(SELECT 1 FROM berkas_arsip WHERE id = :id)")
+    suspend fun sudahAda(id: String): Boolean
+
+    /** Jumlah baris yang sudah terindeks untuk sekumpulan id (satu query). */
+    @Query("SELECT COUNT(*) FROM berkas_arsip WHERE id IN (:daftarId)")
+    suspend fun jumlahDariId(daftarId: List<String>): Int
 }
