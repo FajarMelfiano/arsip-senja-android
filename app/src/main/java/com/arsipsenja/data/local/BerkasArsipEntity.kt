@@ -69,8 +69,8 @@ data class BerkasArsipEntity(
     @ColumnInfo(defaultValue = "0") val tdThumbFileId: Int = 0,
     /** Jalur thumbnail lokal (filesDir/thumbs) bila sudah diunduh. */
     val thumbPath: String? = null,
-    val deskripsi: String?,
-    val dibuatPada: Long,
+    val deskripsi: String? = null,
+    val dibuatPada: Long = 0L,
 
     // ---- v6: integritas, kelompok, dan rekonsiliasi -----------------------
 

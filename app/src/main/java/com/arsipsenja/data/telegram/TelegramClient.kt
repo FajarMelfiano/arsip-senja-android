@@ -5,6 +5,8 @@ import android.os.Build
 import android.util.Log
 import com.arsipsenja.BuildConfig
 import com.arsipsenja.data.local.PengaturanStore
+import com.arsipsenja.data.repo.AturanDeteksiVault
+import com.arsipsenja.data.repo.PeranPenggunaChat
 import com.arsipsenja.data.repo.PenjagaVault
 import com.arsipsenja.util.TipeFile
 import java.io.File
@@ -642,40 +644,102 @@ private fun tanganiOtorisasi(state: TdApi.AuthorizationState?) {
     suspend fun sayaId(): Long =
         idSaya ?: kirim(TdApi.GetMe()).id.also { idSaya = it }
 
+    private fun peranDariStatus(status: TdApi.ChatMemberStatus?): PeranPenggunaChat = when (status) {
+        is TdApi.ChatMemberStatusCreator -> PeranPenggunaChat.PEMILIK
+        is TdApi.ChatMemberStatusAdministrator -> PeranPenggunaChat.ADMIN
+        is TdApi.ChatMemberStatusMember -> PeranPenggunaChat.ANGGOTA
+        else -> PeranPenggunaChat.TAK_DIKETAHUI
+    }
+
     /**
-     * True bila pengguna sendiri adalah PEMBUAT (creator) grup ini.
+     * True bila pengguna sendiri adalah PEMILIK atau ADMIN grup ini.
      * Dipakai untuk menyaring "Pilih grup lama" agar hanya menampilkan
      * grup milik sendiri, bukan grup orang lain yang diikuti.
      *
      * Nama kelas TDLib diverifikasi dari AAR dependensi (capullo-tech,
      * commit 11850ef): GetChatMember memakai `memberId: MessageSender`,
      * bukan userId mentah — jadi anggota dinyatakan via MessageSenderUser.
+     * Pendekatan fail-closed: bila gagal diperiksa atau bukan owner/admin,
+     * kembalikan false.
      */
     suspend fun apakahPemilik(chatId: Long): Boolean {
-        val anggota = kirim(
-            TdApi.GetChatMember().apply {
-                this.chatId = chatId
-                memberId = TdApi.MessageSenderUser(sayaId())
-            },
-        )
-        return anggota.status is TdApi.ChatMemberStatusCreator
+        val anggota = try {
+            kirim(
+                TdApi.GetChatMember().apply {
+                    this.chatId = chatId
+                    memberId = TdApi.MessageSenderUser(sayaId())
+                },
+            )
+        } catch (e: Exception) {
+            Log.w(tag, "Gagal memeriksa status anggota untuk chat $chatId", e)
+            return false
+        }
+        return AturanDeteksiVault.adalahPemilikAtauAdmin(peranDariStatus(anggota.status))
     }
 
     /**
-     * Supergroup (bukan channel) MILIK SENDIRI dari daftar chat utama —
-     * kandidat vault. Grup yang gagal diperiksa kepemilikannya
+     * Supergroup (bukan channel) MILIK SENDIRI (owner/admin) dari seluruh obrolan —
+     * kandidat vault. Melakukan paginasi GetChats / LoadChats hingga tuntas agar grup lama
+     * di luar 100 teratas tetap terdeteksi. Grup yang gagal diperiksa kepemilikannya
      * dikeluarkan (fail-closed) + dicatat ke log; bila SEMUA pengecekan
      * gagal, galat dilempar agar UI menampilkan "Gagal memuat grup: ..."
      * bukan daftar kosong yang menyesatkan.
      */
     suspend fun daftarSupergroup(): List<TdApi.Chat> {
-        val daftar = kirim(
-            TdApi.GetChats().apply {
-                chatList = TdApi.ChatListMain()
-                limit = 100
-            },
-        )
-        val supergroup = daftar.chatIds.toList()
+        val semuaChatId = linkedSetOf<Long>()
+        var putaran = 0
+        while (putaran < 50) {
+            putaran++
+            val adaLagi = try {
+                kirim(
+                    TdApi.LoadChats().apply {
+                        chatList = TdApi.ChatListMain()
+                        limit = 100
+                    },
+                )
+                true
+            } catch (e: Exception) {
+                // TDLib melempar 404 ketika seluruh obrolan sudah termuat
+                false
+            }
+
+            val batch = try {
+                kirim(
+                    TdApi.GetChats().apply {
+                        chatList = TdApi.ChatListMain()
+                        limit = 100
+                    },
+                )
+            } catch (e: Exception) {
+                null
+            }
+
+            if (batch == null || batch.chatIds.isEmpty()) {
+                if (!adaLagi) break
+            } else {
+                val sebelum = semuaChatId.size
+                semuaChatId.addAll(batch.chatIds.toList())
+                if (semuaChatId.size == sebelum && !adaLagi) break
+            }
+
+            if (!adaLagi) break
+        }
+
+        if (semuaChatId.isEmpty()) {
+            val fallback = runCatching {
+                kirim(
+                    TdApi.GetChats().apply {
+                        chatList = TdApi.ChatListMain()
+                        limit = 100
+                    },
+                )
+            }.getOrNull()
+            if (fallback != null) {
+                semuaChatId.addAll(fallback.chatIds.toList())
+            }
+        }
+
+        val supergroup = semuaChatId
             .mapNotNull { id ->
                 try {
                     kirim(TdApi.GetChat().apply { chatId = id })
@@ -1038,6 +1102,25 @@ private fun tanganiOtorisasi(state: TdApi.AuthorizationState?) {
         }
         menunggu.await()
         kirim(TdApi.GetFile().apply { this.fileId = fileId })
+    }
+
+    /** Ambil metadata berkas TDLib (misalnya untuk menyegarkan ukuran bila masih 0). */
+    suspend fun ambilFile(fileId: Int): TdApi.File =
+        kirim(TdApi.GetFile().apply { this.fileId = fileId })
+
+    /** Ambil pesan tertentu dari Telegram (untuk konfirmasi status pengiriman). */
+    suspend fun ambilPesan(chatId: Long, messageId: Long): TdApi.Message =
+        kirim(TdApi.GetMessage(chatId, messageId))
+
+    /** Hapus satu atau beberapa pesan dari chat Telegram. */
+    suspend fun hapusPesan(chatId: Long, messageIds: List<Long>, untukSemua: Boolean = true) {
+        kirim<TdApi.Ok>(
+            TdApi.DeleteMessages().apply {
+                this.chatId = chatId
+                this.messageIds = messageIds.toLongArray()
+                this.revoke = untukSemua
+            },
+        )
     }
 
     // ---------------------------------------------------------------------

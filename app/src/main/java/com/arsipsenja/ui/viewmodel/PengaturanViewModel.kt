@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.arsipsenja.data.local.PengaturanStore
 import com.arsipsenja.data.local.StatistikBerkas
 import com.arsipsenja.data.repo.ArsipRepository
+import com.arsipsenja.data.repo.GrupDuplikat
+import com.arsipsenja.data.repo.KandidatVault
 import com.arsipsenja.data.repo.PenjagaVault
 import com.arsipsenja.data.repo.StatusRealtime
 import com.arsipsenja.data.telegram.StatusOtorisasi
@@ -54,8 +56,8 @@ class PengaturanViewModel(
     val vaultAktif: StateFlow<Long?> = _vaultAktif.asStateFlow()
 
     private val _kandidatVault =
-        MutableStateFlow<List<ArsipRepository.KandidatVault>>(emptyList())
-    val kandidatVault: StateFlow<List<ArsipRepository.KandidatVault>> =
+        MutableStateFlow<List<KandidatVault>>(emptyList())
+    val kandidatVault: StateFlow<List<KandidatVault>> =
         _kandidatVault.asStateFlow()
 
     private val _memuatVault = MutableStateFlow(false)
@@ -344,6 +346,74 @@ class PengaturanViewModel(
 
     fun tanganiGalat() {
         _galat.value = null
+    }
+
+    // ---- Pindai Duplikat ----
+
+    private val _daftarDuplikat = MutableStateFlow<List<GrupDuplikat>>(emptyList())
+    val daftarDuplikat: StateFlow<List<GrupDuplikat>> = _daftarDuplikat.asStateFlow()
+
+    private val _memuatDuplikat = MutableStateFlow(false)
+    val memuatDuplikat: StateFlow<Boolean> = _memuatDuplikat.asStateFlow()
+
+    fun pindaiDuplikat() {
+        viewModelScope.launch {
+            _memuatDuplikat.value = true
+            try {
+                _daftarDuplikat.value = repo.pindaiDuplikat()
+            } catch (e: Exception) {
+                _galat.value = PesanStatus(
+                    NadaStatus.GALAT,
+                    "Gagal memindai duplikat: ${e.message}",
+                )
+            } finally {
+                _memuatDuplikat.value = false
+            }
+        }
+    }
+
+    fun rapikanDuplikatLokal(onSelesai: (Int) -> Unit = {}) {
+        viewModelScope.launch {
+            _memuatDuplikat.value = true
+            try {
+                val totalDihapus = repo.rapikanDuplikatLokal(_daftarDuplikat.value)
+                _daftarDuplikat.value = emptyList()
+                _galat.value = PesanStatus(
+                    NadaStatus.SUKSES,
+                    "Berhasil merapikan indeks: $totalDihapus entri duplikat dibersihkan.",
+                )
+                onSelesai(totalDihapus)
+            } catch (e: Exception) {
+                _galat.value = PesanStatus(
+                    NadaStatus.GALAT,
+                    "Gagal merapikan duplikat: ${e.message}",
+                )
+            } finally {
+                _memuatDuplikat.value = false
+            }
+        }
+    }
+
+    fun rapikanDuplikatDenganTelegram(onSelesai: (Int) -> Unit = {}) {
+        viewModelScope.launch {
+            _memuatDuplikat.value = true
+            try {
+                val totalDihapus = repo.rapikanDuplikatDenganTelegram(_daftarDuplikat.value)
+                _daftarDuplikat.value = emptyList()
+                _galat.value = PesanStatus(
+                    NadaStatus.SUKSES,
+                    "Berhasil merapikan: $totalDihapus pesan dihapus dari Telegram dan indeks lokal.",
+                )
+                onSelesai(totalDihapus)
+            } catch (e: Exception) {
+                _galat.value = PesanStatus(
+                    NadaStatus.GALAT,
+                    "Gagal merapikan duplikat Telegram: ${e.message}",
+                )
+            } finally {
+                _memuatDuplikat.value = false
+            }
+        }
     }
 
     companion object {

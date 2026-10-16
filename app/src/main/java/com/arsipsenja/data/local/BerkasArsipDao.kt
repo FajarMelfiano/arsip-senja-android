@@ -61,18 +61,35 @@ interface BerkasArsipDao {
 
     /**
      * Hitung baris dengan nama + ukuran + chat yang sama dalam jendela
-     * waktu. Dipakai guard idempoten retry [UploadWorker]: kiriman yang
+     * waktu. Bila ukuran baris terindeks = 0 ATAU ukuran lokal = 0,
+     * cocokkan HANYA nama + chatId dalam jendela.
+     * Dipakai guard idempoten retry [UploadWorker]: kiriman yang
      * sebenarnya sudah sampai (terindeks batch realtime) tidak dikirim ulang.
      */
     @Query(
         """
         SELECT COUNT(*) FROM berkas_arsip
-        WHERE nama = :nama AND ukuran = :ukuran
+        WHERE nama = :nama
+          AND (:ukuran <= 0 OR ukuran = 0 OR ukuran = :ukuran)
           AND (koleksiId = :chatId OR chatId = :chatId)
-          AND dibuatPada > :sejak
+          AND (dibuatPada > :sejak OR tanggal > :sejak)
         """,
     )
     suspend fun hitungMirip(nama: String, ukuran: Long, chatId: Long, sejak: Long): Int
+
+    /**
+     * Ambil berkas kandidat berdasarkan nama dan chatId dalam jendela waktu.
+     * Evaluasi kecocokan ukuran dan jendela waktu diserahkan ke [AturanIdempoten.cocok].
+     */
+    @Query(
+        """
+        SELECT * FROM berkas_arsip
+        WHERE nama = :nama
+          AND (koleksiId = :chatId OR chatId = :chatId)
+          AND (dibuatPada > :sejak OR tanggal > :sejak)
+        """,
+    )
+    suspend fun cariKandidatIdempoten(nama: String, chatId: Long, sejak: Long): List<BerkasArsipEntity>
 
     @Upsert
     suspend fun simpan(berkas: BerkasArsipEntity)
@@ -94,6 +111,12 @@ interface BerkasArsipDao {
 
     @Query("DELETE FROM berkas_arsip WHERE id = :id")
     suspend fun hapus(id: String)
+
+    @Query("SELECT * FROM berkas_arsip ORDER BY nomorKatalog ASC")
+    suspend fun ambilSemua(): List<BerkasArsipEntity>
+
+    @Query("DELETE FROM berkas_arsip WHERE id IN (:daftarId)")
+    suspend fun hapusBanyak(daftarId: List<String>): Int
 
     // =====================================================================
     // Integritas & duplikat

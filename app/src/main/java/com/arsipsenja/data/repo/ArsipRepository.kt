@@ -117,14 +117,6 @@ class ArsipRepository(
 
     // ---- Vault ----
 
-    /** Kandidat grup vault untuk dipilih pengguna di Pengaturan. */
-    data class KandidatVault(
-        val chatId: Long,
-        val nama: String,
-        /** True bila grup sudah mode forum (topik bisa dipakai langsung). */
-        val forumSiap: Boolean,
-    )
-
     /**
      * Daftar supergroup (bukan channel) milik sendiri; tiap grup dites
      * dukung forum atau tidak.
@@ -477,9 +469,10 @@ class ArsipRepository(
 
             val mentah = pesan.filter { it.id > batasBawah }.mapNotNull { it.keBerkasMentah() }
             val entri = mentah.map { b ->
+                val bSegar = pastikanUkuran(b)
                 nomor += 1
                 baru += 1
-                b.keEntity(
+                bSegar.keEntity(
                     koleksiId = kunci.chatId,
                     topicId = kunci.topicId,
                     nomorKatalog = nomor,
@@ -564,12 +557,17 @@ class ArsipRepository(
      * @return hanya koleksi bertanda impor.
      */
     suspend fun tarikDaftarKoleksi(): List<KoleksiEntity> {
-        val daftarVault = mutableListOf<Long>()
+        val daftarVault = mutableSetOf<Long>()
         pengaturan.vaultSekarang()?.let { daftarVault += it }
         runCatching { deteksiVaultMilikSendiri() }
             .onFailure { Log.i(tag, "Deteksi vault untuk tarik gagal: ${it.message}") }
             .getOrNull()
-            ?.forEach { if (it.chatId !in daftarVault) daftarVault += it.chatId }
+            ?.forEach { daftarVault += it.chatId }
+        runCatching { daftarKandidatVault() }
+            .onFailure { Log.i(tag, "Kandidat vault untuk tarik gagal: ${it.message}") }
+            .getOrNull()
+            ?.filter { it.forumSiap }
+            ?.forEach { daftarVault += it.chatId }
         val semua = mutableListOf<KoleksiEntity>()
         daftarVault.forEach { vault ->
             runCatching { tarikTopikVault(vault, sebagaiImpor = true) }
@@ -667,6 +665,19 @@ class ArsipRepository(
     private val kunciSinkron = Mutex()
 
     private val realtimeBerjalan = AtomicBoolean(false)
+    private val koleksiImporDikenalRealtime = java.util.concurrent.ConcurrentHashMap.newKeySet<KunciKoleksi>()
+
+    /**
+     * Daftarkan satu koleksi impor yang dibuka pengguna agar di-ingest secara
+     * realtime (lazy subscribe). Koleksi impor yang belum pernah disentuh
+     * pengguna tidak menyedot pemrosesan pesan realtime.
+     */
+    fun daftarkanKoleksiImporDikenal(kunci: KunciKoleksi) {
+        koleksiImporDikenalRealtime.add(kunci)
+    }
+
+    fun apakahKoleksiImporDikenalRealtime(kunci: KunciKoleksi): Boolean =
+        koleksiImporDikenalRealtime.contains(kunci)
 
     /**
      * Mulai mesin realtime — idempoten, dipanggil sekali dari
@@ -742,7 +753,15 @@ class ArsipRepository(
         var duplikat = 0L
         for (m in pesan) {
             val kunci = KunciKoleksi(m.chatId, AturanRealtime.topikDariPesan(m))
-            val dikenal = koleksiDao.ambil(kunci.chatId, kunci.topicId) != null
+            val entitasKoleksi = koleksiDao.ambil(kunci.chatId, kunci.topicId)
+            val dikenal = if (entitasKoleksi == null) {
+                false
+            } else if (entitasKoleksi.asalImpor) {
+                // Lazy subscribe: koleksi impor hanya di-ingest bila pernah dibuka pengguna
+                koleksiImporDikenalRealtime.contains(kunci)
+            } else {
+                true // Koleksi pribadi selalu dikenal
+            }
             val id = AturanRealtime.kunciDedupe(m.chatId, m.id)
             val mentah = m.keBerkasMentah()
             when (AturanRealtime.keputusanPesan(dikenal, id in sudahAda, mentah != null)) {
@@ -760,8 +779,9 @@ class ArsipRepository(
         for ((kunci, daftar) in perKunci) {
             var nomor = berkasDao.jumlah(kunci.chatId, kunci.topicId)
             val entri = daftar.map { b ->
+                val bSegar = pastikanUkuran(b)
                 nomor += 1
-                b.keEntity(kunci.chatId, kunci.topicId, nomor, sekarang)
+                bSegar.keEntity(kunci.chatId, kunci.topicId, nomor, sekarang)
             }
             berkasDao.simpanSemua(entri)
             koleksiDao.hitungUlang(kunci.chatId, kunci.topicId)
@@ -844,7 +864,8 @@ class ArsipRepository(
         telegram.pesanDiubah.collect { pesan ->
             val id = BerkasArsipEntity.kunci(pesan.chatId, pesan.id)
             val lama = berkasDao.ambilId(id) ?: return@collect
-            val baru = pesan.keBerkasMentah() ?: return@collect
+            val mentah = pesan.keBerkasMentah() ?: return@collect
+            val baru = pastikanUkuran(mentah)
             if (baru.nama == lama.nama && baru.ukuran == lama.ukuran &&
                 baru.caption == lama.deskripsi
             ) {
@@ -1635,8 +1656,20 @@ class ArsipRepository(
     }
 
     /**
+     * Refresh metadata ukuran berkas via TDLib 1x percobaan ringan bila ukuran masih 0.
+     * Bila tetap 0, berkas tetap dikembalikan apa adanya agar tetap tersimpan.
+     */
+    private suspend fun pastikanUkuran(b: BerkasMentah): BerkasMentah {
+        if (b.ukuran > 0L || b.tdFileId <= 0) return b
+        val ukuranSegar = runCatching {
+            telegram.ambilFile(b.tdFileId).size
+        }.getOrNull() ?: 0L
+        return if (ukuranSegar > 0L) b.copy(ukuran = ukuranSegar) else b
+    }
+
+    /**
      * True bila berkas bernama [nama] berukuran [ukuran] untuk chat [chatId]
-     * sudah terindeks dalam [jendelaMs] terakhir. Guard idempoten untuk
+     * sudah terindeks dalam [jendelaMs] terakhir (default 7 hari). Guard idempoten untuk
      * retry [UploadWorker]: kiriman yang sebenarnya sudah sampai ke Telegram
      * (terindeks oleh batch realtime) tidak dikirim ulang sebagai pesan baru.
      * Hanya dipakai saat runAttemptCount > 0 — unggahan baru dari pengguna
@@ -1646,12 +1679,63 @@ class ArsipRepository(
         nama: String,
         ukuran: Long,
         chatId: Long,
-        jendelaMs: Long = 90L * 60L * 1000L,
-    ): Boolean =
-        berkasDao.hitungMirip(nama, ukuran, chatId, System.currentTimeMillis() - jendelaMs) > 0
+        jendelaMs: Long = AturanIdempoten.JENDELA_DEFAULT_MS,
+    ): Boolean {
+        val sekarang = System.currentTimeMillis()
+        val sejak = sekarang - jendelaMs
+        val kandidat = berkasDao.cariKandidatIdempoten(nama, chatId, sejak)
+        return kandidat.any { target ->
+            val waktuTarget = maxOf(target.dibuatPada, target.tanggal)
+            AturanIdempoten.cocok(
+                namaKandidat = nama,
+                ukuranKandidat = ukuran,
+                chatIdKandidat = chatId,
+                namaTarget = target.nama,
+                ukuranTarget = target.ukuran,
+                chatIdTarget = target.koleksiId ?: target.chatId,
+                waktuTarget = waktuTarget,
+                sekarang = sekarang,
+                jendelaMs = jendelaMs,
+            )
+        }
+    }
 
     suspend fun hapusBerkas(berkasId: String) {
         berkasDao.hapus(berkasId)
+    }
+
+    /** Pindai kelompok berkas duplikat yang ada di indeks lokal. */
+    suspend fun pindaiDuplikat(): List<GrupDuplikat> {
+        val semua = berkasDao.ambilSemua()
+        return AturanDuplikat.kelompokkan(semua)
+    }
+
+    /**
+     * Rapikan duplikat: simpan SATU baris per grup (nomorKatalog terkecil),
+     * hapus baris lain DARI INDEKS LOKAL SAJA. Pesan Telegram TIDAK DIHAPUS.
+     */
+    suspend fun rapikanDuplikatLokal(grup: List<GrupDuplikat>): Int {
+        val (_, dihapus) = AturanDuplikat.pisahkanUntukRapikan(grup)
+        if (dihapus.isEmpty()) return 0
+        return berkasDao.hapusBanyak(dihapus.map { it.id })
+    }
+
+    /**
+     * Opsi lanjutan: simpan SATU baris per grup (nomorKatalog terkecil),
+     * hapus baris duplikat lain dari indeks lokal DAN hapus pesannya di Telegram.
+     */
+    suspend fun rapikanDuplikatDenganTelegram(grup: List<GrupDuplikat>): Int {
+        val (_, dihapus) = AturanDuplikat.pisahkanUntukRapikan(grup)
+        if (dihapus.isEmpty()) return 0
+        dihapus.forEach { b ->
+            val cid = b.koleksiId ?: b.chatId
+            if (cid != 0L && b.messageId > 0L) {
+                runCatching {
+                    telegram.hapusPesan(cid, listOf(b.messageId))
+                }
+            }
+        }
+        return berkasDao.hapusBanyak(dihapus.map { it.id })
     }
 
     companion object {
