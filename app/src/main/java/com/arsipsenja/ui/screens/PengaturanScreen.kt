@@ -47,6 +47,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.arsipsenja.BuildConfig
 import com.arsipsenja.data.repo.ArsipRepository
+import com.arsipsenja.data.repo.GrupDuplikat
 import com.arsipsenja.data.telegram.StatusOtorisasi
 import com.arsipsenja.ui.components.ChipArsip
 import com.arsipsenja.ui.components.KolomIsian
@@ -62,6 +63,8 @@ import com.arsipsenja.ui.viewmodel.PengaturanViewModel
 import com.arsipsenja.util.ArahUrut
 import com.arsipsenja.util.TampilanDasbor
 import com.arsipsenja.util.UrutBerkas
+import com.arsipsenja.util.formatUkuran
+import com.arsipsenja.util.formatTanggal
 
 /**
  * Layar pengaturan: statistik, tampilan dasbor, urutan, kunci biometrik,
@@ -95,6 +98,9 @@ fun PengaturanScreen() {
     var apiHashBaru by remember { mutableStateOf("") }
     var dialogGrup by remember { mutableStateOf(false) }
     var dialogVaultBaru by remember { mutableStateOf(false) }
+    var dialogDuplikat by remember { mutableStateOf(false) }
+    var konfirmasiHapusTelegram1 by remember { mutableStateOf(false) }
+    var konfirmasiHapusTelegram2 by remember { mutableStateOf(false) }
 
     val vaultAktif by vm.vaultAktif.collectAsState()
     val kandidatVault by vm.kandidatVault.collectAsState()
@@ -103,6 +109,8 @@ fun PengaturanScreen() {
     val pesanVault by vm.pesanVault.collectAsState()
     val infoVault by vm.infoVault.collectAsState()
     val statusRealtime by vm.statusRealtime.collectAsState()
+    val daftarDuplikat by vm.daftarDuplikat.collectAsState()
+    val memuatDuplikat by vm.memuatDuplikat.collectAsState()
     val namaVaultAktif = infoVault?.nama
         ?: kandidatVault.firstOrNull { it.chatId == vaultAktif }?.nama
         ?: if (vaultAktif != null) "Grup ${vaultAktif}" else "Belum dipilih"
@@ -355,6 +363,16 @@ fun PengaturanScreen() {
         Spacer(Modifier.height(16.dp))
 
         TombolCadangan(
+            teks = "Pindai duplikat berkas",
+            ikon = ArsipIcons.Copy,
+            onClick = {
+                vm.pindaiDuplikat()
+                dialogDuplikat = true
+            },
+        )
+        Spacer(Modifier.height(10.dp))
+
+        TombolCadangan(
             teks = "Sinkronkan semua koleksi",
             ikon = ArsipIcons.RefreshCw,
             onClick = vm::sinkronSemua,
@@ -458,6 +476,78 @@ fun PengaturanScreen() {
             },
             dismissButton = {
                 TextButton(onClick = { konfirmasiKeluar = false }) {
+                    Text("Batal", color = WarnaArsip.Tinta2)
+                }
+            },
+        )
+    }
+
+    if (dialogDuplikat) {
+        DialogPindaiDuplikat(
+            daftar = daftarDuplikat,
+            memuat = memuatDuplikat,
+            onRapikanLokal = {
+                dialogDuplikat = false
+                vm.rapikanDuplikatLokal()
+            },
+            onMintaHapusTelegram = {
+                konfirmasiHapusTelegram1 = true
+            },
+            onTutup = { dialogDuplikat = false },
+        )
+    }
+
+    if (konfirmasiHapusTelegram1) {
+        AlertDialog(
+            onDismissRequest = { konfirmasiHapusTelegram1 = false },
+            containerColor = WarnaArsip.Veil,
+            titleContentColor = WarnaArsip.Tinta,
+            textContentColor = WarnaArsip.Tinta2,
+            title = { Text("Hapus juga pesan di Telegram?") },
+            text = {
+                Text(
+                    "Pesan duplikat akan dihapus langsung dari grup/channel Telegram sehingga berkas di server juga terhapus. Satu entri katalog awal akan tetap disimpan.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    konfirmasiHapusTelegram1 = false
+                    konfirmasiHapusTelegram2 = true
+                }) {
+                    Text("Lanjutkan", color = WarnaArsip.Bahaya)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { konfirmasiHapusTelegram1 = false }) {
+                    Text("Batal", color = WarnaArsip.Tinta2)
+                }
+            },
+        )
+    }
+
+    if (konfirmasiHapusTelegram2) {
+        AlertDialog(
+            onDismissRequest = { konfirmasiHapusTelegram2 = false },
+            containerColor = WarnaArsip.Veil,
+            titleContentColor = WarnaArsip.Tinta,
+            textContentColor = WarnaArsip.Tinta2,
+            title = { Text("Konfirmasi Akhir Penghapusan") },
+            text = {
+                Text(
+                    "Pesan Telegram yang dihapus TIDAK DAPAT dipulihkan kembali. Yakin ingin menghapus seluruh pesan rangkap ini dari Telegram?",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    konfirmasiHapusTelegram2 = false
+                    dialogDuplikat = false
+                    vm.rapikanDuplikatDenganTelegram()
+                }) {
+                    Text("Ya, Hapus dari Telegram", color = WarnaArsip.Bahaya)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { konfirmasiHapusTelegram2 = false }) {
                     Text("Batal", color = WarnaArsip.Tinta2)
                 }
             },
@@ -613,6 +703,150 @@ private fun DialogPilihGrup(
                 ) {
                     TextButton(onClick = onTutup) {
                         Text("Tutup", color = WarnaArsip.Tinta2)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Dialog hasil pemindaian duplikat berkas: menampilkan daftar kelompok duplikat
+ * (nama, ukuran, jumlah rangkap, tanggal) serta aksi rapikan lokal dan opsi lanjutan Telegram.
+ */
+@Composable
+private fun DialogPindaiDuplikat(
+    daftar: List<GrupDuplikat>,
+    memuat: Boolean,
+    onRapikanLokal: () -> Unit,
+    onMintaHapusTelegram: () -> Unit,
+    onTutup: () -> Unit,
+) {
+    Dialog(onDismissRequest = onTutup) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = WarnaArsip.Veil,
+            contentColor = WarnaArsip.Tinta,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+            ) {
+                Text(
+                    text = "Pindai duplikat berkas",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = WarnaArsip.Tinta,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "Menemukan berkas dengan koleksi, topik, nama, dan ukuran yang sama di indeks lokal.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = WarnaArsip.Tinta2,
+                )
+                Spacer(Modifier.height(12.dp))
+
+                if (memuat) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 24.dp),
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
+                        CircularProgressIndicator(
+                            color = WarnaArsip.Amber,
+                            modifier = Modifier.size(28.dp),
+                        )
+                    }
+                } else if (daftar.isEmpty()) {
+                    Text(
+                        text = "Tidak ditemukan berkas duplikat di indeks.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = WarnaArsip.Tinta3,
+                        modifier = Modifier.padding(vertical = 16.dp),
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(onClick = onTutup) {
+                            Text("Tutup", color = WarnaArsip.Amber)
+                        }
+                    }
+                } else {
+                    val totalDuplikat = daftar.sumOf { it.jumlahRangkap - 1 }
+                    Text(
+                        text = "Ditemukan ${daftar.size} kelompok (${totalDuplikat} baris rangkap).",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = WarnaArsip.Amber,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    LazyColumn(
+                        modifier = Modifier.heightIn(max = 260.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(daftar) { grup ->
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = WarnaArsip.Latar,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Text(
+                                        text = grup.nama,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = WarnaArsip.Tinta,
+                                        maxLines = 1,
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(
+                                            text = formatUkuran(grup.ukuran),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = WarnaArsip.Tinta2,
+                                        )
+                                        Text(
+                                            text = "${grup.jumlahRangkap}x rangkap",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = WarnaArsip.Amber,
+                                        )
+                                        Text(
+                                            text = formatTanggal(grup.tanggalTerbaru),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = WarnaArsip.Tinta3,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(16.dp))
+                    TombolUtama(
+                        teks = "Rapikan (Indeks Lokal)",
+                        ikon = ArsipIcons.Scissors,
+                        onClick = onRapikanLokal,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    TextButton(
+                        onClick = onMintaHapusTelegram,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            text = "Opsi lanjutan: Hapus juga di Telegram",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = WarnaArsip.Bahaya,
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(onClick = onTutup) {
+                            Text("Tutup", color = WarnaArsip.Tinta2)
+                        }
                     }
                 }
             }

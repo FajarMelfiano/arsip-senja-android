@@ -170,19 +170,78 @@ class UploadWorker(
                         topicId = koleksi.topicId,
                     )
 
-                    pantauProgresUnggah(telegram, terkirim, namaPotongan, idNotif)
+                    // Pemantauan progres tidak boleh menggagalkan konfirmasi server
+                    runCatching {
+                        pantauProgresUnggah(telegram, terkirim, namaPotongan, idNotif)
+                    }
 
-                    val dikonfirmasi = telegram.tungguTerkirim(terkirim.id)
-                    val mentah = dikonfirmasi.pesan.keBerkasMentah() ?: return@suspendPotongan
+                    val dikonfirmasi = try {
+                        telegram.tungguTerkirim(terkirim.id)
+                    } catch (e: Exception) {
+                        // Cek apakah server sebenarnya sudah mengonfirmasi pengiriman pesan ini
+                        val cekPesan = runCatching {
+                            telegram.ambilPesan(koleksi.chatId, terkirim.id)
+                        }.getOrNull()
+                        if (cekPesan != null && cekPesan.sendingState == null) {
+                            com.arsipsenja.data.telegram.PesanTerkirim(cekPesan, terkirim.id)
+                        } else {
+                            throw e
+                        }
+                    }
+
+                    // Server sudah mengonfirmasi pesan terkirim.
+                    var mentah = dikonfirmasi.pesan.keBerkasMentah()
+                    if (mentah != null && mentah.ukuran == 0L && mentah.tdFileId > 0) {
+                        val ukuranSegar = runCatching {
+                            telegram.ambilFile(mentah.tdFileId).ukuranTotal()
+                        }.getOrNull() ?: 0L
+                        if (ukuranSegar > 0L) {
+                            mentah = mentah.copy(ukuran = ukuranSegar)
+                        }
+                    }
+
                     nomorKatalog += 1
-                    val entri = mentah
-                        .keEntity(
+                    val sekarang = System.currentTimeMillis()
+                    val entri = if (mentah != null) {
+                        mentah
+                            .keEntity(
+                                koleksiId = koleksi.chatId,
+                                topicId = koleksi.topicId,
+                                nomorKatalog = nomorKatalog,
+                                sekarang = sekarang,
+                            )
+                            .copy(tdLocalPath = null)
+                    } else {
+                        // Catat jejak idempoten (nama + ukuran + chatId + waktu)
+                        com.arsipsenja.data.local.BerkasArsipEntity(
+                            id = com.arsipsenja.data.local.BerkasArsipEntity.kunci(
+                                koleksi.chatId,
+                                dikonfirmasi.pesan.id,
+                            ),
+                            messageId = dikonfirmasi.pesan.id,
+                            chatId = koleksi.chatId,
                             koleksiId = koleksi.chatId,
                             topicId = koleksi.topicId,
+                            nama = namaPotongan,
+                            ukuran = potonganFile.length(),
+                            tanggal = sekarang,
+                            mime = "",
+                            tipe = tipe.name,
                             nomorKatalog = nomorKatalog,
-                            sekarang = System.currentTimeMillis(),
+                            tdFileId = 0,
+                            tdLocalPath = null,
+                            tdThumbFileId = 0,
+                            thumbPath = null,
+                            deskripsi = null,
+                            dibuatPada = sekarang,
+                            hashSha256 = null,
+                            grupId = grupId,
+                            indeksPotongan = indeks,
+                            jumlahPotongan = total,
+                            namaAsli = namaAsli,
+                            ukuranTotal = ukuran,
                         )
-                        .copy(tdLocalPath = null)
+                    }
                     repo.simpanHasilUnggah(entri)
 
                     Notifikasi.tampilkanUnggah(

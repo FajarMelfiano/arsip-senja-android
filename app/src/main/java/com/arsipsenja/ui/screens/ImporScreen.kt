@@ -24,6 +24,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +47,7 @@ import com.arsipsenja.ui.components.SheetBukaKunci
 import com.arsipsenja.ui.components.TombolCadangan
 import com.arsipsenja.ui.components.TombolIkon
 import com.arsipsenja.ui.components.TombolUtama
+import com.arsipsenja.ui.components.formatJam
 import com.arsipsenja.ui.icons.ArsipIcons
 import com.arsipsenja.ui.theme.Fraunces
 import com.arsipsenja.ui.theme.WarnaArsip
@@ -68,6 +70,7 @@ fun ImporScreen(onBukaBerkas: (String) -> Unit) {
     val dipilih by vm.dipilih.collectAsState()
     val berkas by vm.berkas.collectAsState()
     val memuat by vm.memuat.collectAsState()
+    val terakhirDisinkron by vm.terakhirDisinkron.collectAsState()
     val pesan by vm.pesan.collectAsState()
     val antreanTarik by vm.antreanTarik.collectAsState()
     val semuaNamaKoleksi by vm.semuaNamaKoleksi.collectAsState()
@@ -75,6 +78,10 @@ fun ImporScreen(onBukaBerkas: (String) -> Unit) {
 
     var bukaUntuk by remember { mutableStateOf<KoleksiEntity?>(null) }
     var tertundaBerkasId by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        vm.autoSinkronSaatDibuka()
+    }
 
     val koleksiDipilih = dipilih?.let { kunci ->
         impor.firstOrNull { it.kunci == kunci }
@@ -110,6 +117,7 @@ fun ImporScreen(onBukaBerkas: (String) -> Unit) {
         KepalaImpor(
             jumlahKoleksi = impor.size,
             memuat = memuat,
+            terakhirDisinkron = terakhirDisinkron,
             onTarik = vm::tarik,
             onSinkron = vm::sinkron,
         )
@@ -240,6 +248,7 @@ fun ImporScreen(onBukaBerkas: (String) -> Unit) {
 private fun KepalaImpor(
     jumlahKoleksi: Int,
     memuat: Boolean,
+    terakhirDisinkron: Long?,
     onTarik: () -> Unit,
     onSinkron: () -> Unit,
 ) {
@@ -254,6 +263,16 @@ private fun KepalaImpor(
                 Text(
                     text = "$jumlahKoleksi koleksi dari akunmu",
                     style = MaterialTheme.typography.bodySmall,
+                    color = WarnaArsip.Tinta3,
+                )
+                val labelSinkron = if (terakhirDisinkron != null) {
+                    "Terakhir disinkron: ${formatJam(terakhirDisinkron)}"
+                } else {
+                    "Terakhir disinkron: Belum pernah"
+                }
+                Text(
+                    text = labelSinkron,
+                    style = MaterialTheme.typography.labelSmall,
                     color = WarnaArsip.Tinta3,
                 )
             }

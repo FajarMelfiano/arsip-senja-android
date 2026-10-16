@@ -53,6 +53,9 @@ class ImporViewModel(
     private val _memuat = MutableStateFlow(false)
     val memuat: StateFlow<Boolean> = _memuat.asStateFlow()
 
+    private val _terakhirDisinkron = MutableStateFlow<Long?>(null)
+    val terakhirDisinkron: StateFlow<Long?> = _terakhirDisinkron.asStateFlow()
+
     private val _pesan = MutableStateFlow<PesanStatus?>(null)
     val pesan: StateFlow<PesanStatus?> = _pesan.asStateFlow()
 
@@ -71,8 +74,37 @@ class ImporViewModel(
     /** Ringkasan yang menunggu popup galat ditutup dulu (latest-wins). */
     private var ringkasanTarikTertunda = false
 
+    init {
+        viewModelScope.launch {
+            _terakhirDisinkron.value = repo.statusRealtime.value.sinkronTerakhir
+        }
+    }
+
     fun pilih(kunci: KunciKoleksi?) {
         _dipilih.value = kunci
+        if (kunci != null) {
+            repo.daftarkanKoleksiImporDikenal(kunci)
+        }
+    }
+
+    /**
+     * Auto-sync saat tab Impor dibuka:
+     * - Menjalankan tarik delta + sinkron koleksi impor secara otomatis
+     * - Memperbarui cap waktu terakhir disinkron
+     */
+    fun autoSinkronSaatDibuka() {
+        if (_memuat.value) return
+        viewModelScope.launch {
+            _memuat.value = true
+            try {
+                repo.tarikDaftarKoleksi()
+                _terakhirDisinkron.value = System.currentTimeMillis()
+            } catch (e: Exception) {
+                // Jangan interupsi tampilan bila sinkron latar belakang gagal
+            } finally {
+                _memuat.value = false
+            }
+        }
     }
 
     /** Status penyimpanan lokal satu berkas (untuk penanda kartu). */
@@ -112,6 +144,7 @@ class ImporViewModel(
             try {
                 val sebelum = repo.kunciDikenal()
                 val daftar = repo.tarikDaftarKoleksi()
+                _terakhirDisinkron.value = System.currentTimeMillis()
                 totalTarik = daftar.size
                 gagalTarik = 0
                 val baru = AntreanPenamaan.baruTercakup(sebelum, daftar)
@@ -211,6 +244,7 @@ class ImporViewModel(
             _memuat.value = true
             try {
                 val baru = repo.sinkronImpor()
+                _terakhirDisinkron.value = System.currentTimeMillis()
                 _pesan.value = if (baru > 0) {
                     PesanStatus(
                         NadaStatus.SUKSES,
