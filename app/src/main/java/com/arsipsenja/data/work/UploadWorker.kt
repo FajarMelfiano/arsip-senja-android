@@ -142,12 +142,13 @@ class UploadWorker(
                     com.arsipsenja.util.namaPotongan(namaAsli, indeks)
                 }
                 try {
-                    // Guard idempoten: percobaan ulang setelah kiriman yang
-                    // sebenarnya sudah sampai tidak boleh mengirim pesan baru.
-                    if (runAttemptCount > 0 &&
+                    // Guard idempoten: percobaan ulang (attempt > 0) ATAU lanjutan setelah jeda
+                    // tidak boleh mengirim potongan yang sudah sampai sebelum jeda/gagal.
+                    val isLanjutan = inputData.getBoolean(K_LANJUTAN, false)
+                    if ((runAttemptCount > 0 || isLanjutan) &&
                         repo.sudahTerindeks(namaPotongan, potonganFile.length(), kunci.chatId)
                     ) {
-                        Log.i(tag, "Percobaan $runAttemptCount: $namaPotongan sudah terindeks — lewati.")
+                        Log.i(tag, "Percobaan $runAttemptCount (lanjutan=$isLanjutan): $namaPotongan sudah terindeks — lewati.")
                         return@suspendPotongan
                     }
 
@@ -392,6 +393,13 @@ class UploadWorker(
 
         /** Nama tampil berkas (DISPLAY_NAME SAF); dibaca UI antrean. */
         const val K_NAMA = "namaBerkas"
+
+        /**
+         * Penanda bahwa worker ini dijalankan ulang dari "lanjutkan" (bukan percobaan
+         * ulang otomatis WorkManager). Dipakai oleh guard idempoten agar potongan yang
+         * sudah terkirim sebelum jeda tidak dikirim dua kali.
+         */
+        const val K_LANJUTAN = "lanjutan"
 
         /** Batas retry untuk gagal per-potongan (runAttemptCount 0..1 → retry, ke-2 → FAILED berpesan). */
         private const val MAKS_PERCOBAAN_GAGAL = 2

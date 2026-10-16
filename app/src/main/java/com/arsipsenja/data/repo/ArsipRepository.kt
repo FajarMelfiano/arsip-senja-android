@@ -5,6 +5,7 @@ import android.net.Uri
 import android.util.Log
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.workDataOf
 import com.arsipsenja.data.local.ArsipDatabase
@@ -1286,11 +1287,15 @@ class ArsipRepository(
             val workId = UUID.randomUUID().toString()
             val pekerjaan = "unggah-$workId"
             // Sisipkan status jeda awal (tidak jeda, prioritas normal) ke database.
+            // Simpan juga parameter enqueue agar "lanjutkan" dapat membangun ulang WorkRequest.
             pauseDao.upsert(
                 UploadQueuePauseEntity(
                     workId = workId,
                     isPaused = 0,
-                    priority = 0
+                    priority = 0,
+                    uri = uri.toString(),
+                    koleksiId = kunciFinal.chatId,
+                    topicId = kunciFinal.topicId,
                 )
             )
             val permintaan = OneTimeWorkRequestBuilder<UploadWorker>()
@@ -1314,12 +1319,57 @@ class ArsipRepository(
     }
 
     /**
-     * Mengatur status jeda pekerjaan unggah. Disimpan di Room sehingga
-     * persisten melewati tutup aplikasi maupun reboot perangkat.
+     * Jeda pekerjaan unggah: tandai di Room DAN batalkan work agar berhenti segera.
+     * WorkManager cancel menyebabkan CancellationException di worker — sudah ditangani
+     * dengan `throw e` sehingga state menjadi CANCELLED (bukan FAILED).
+     * Jika entitas tidak ada, tidak melakukan apa-apa.
      */
-    suspend fun setJedaUnggah(workId: String, jeda: Boolean) {
+    suspend fun jedaUnggah(workId: String) {
         val entitas = pauseDao.getPauseStatus(workId) ?: return
-        pauseDao.updatePauseStatus(entitas.copy(isPaused = if (jeda) 1 else 0))
+        pauseDao.updatePauseStatus(entitas.copy(isPaused = 1))
+        workManager.cancelUniqueWork("unggah-$workId")
+    }
+
+    /**
+     * Lanjutkan pekerjaan unggah yang dijeda: hapus tanda jeda di Room, lalu
+     * daftarkan ulang WorkRequest (REPLACE) agar mulai segera — tanpa backoff.
+     *
+     * Guard: jika data enqueue tidak lengkap (uri kosong atau koleksiId 0),
+     * cukup hapus tanda jeda tanpa mendaftarkan ulang.
+     * Guard 2: jika sudah ada state SUCCEEDED, tidak daftarkan ulang (berkas sudah terkirim).
+     */
+    suspend fun lanjutkanUnggah(workId: String) {
+        val entitas = pauseDao.getPauseStatus(workId) ?: return
+        pauseDao.updatePauseStatus(entitas.copy(isPaused = 0))
+
+        // Guard data tidak lengkap
+        if (entitas.uri.isBlank() || entitas.koleksiId == 0L) return
+
+        // Cek state WorkManager: jangan daftarkan ulang bila sudah SUCCEEDED
+        val states = workManager.getWorkInfosForUniqueWork("unggah-$workId").get()
+            .map { it.state }
+        if (!perluDaftarkanUlang(states)) return
+
+        val hanyaWifi = pengaturan.hanyaWifi.first()
+        val pekerjaan = "unggah-$workId"
+        val permintaanBaru = OneTimeWorkRequestBuilder<UploadWorker>()
+            .setInputData(
+                workDataOf(
+                    UploadWorker.K_URI to entitas.uri,
+                    UploadWorker.K_KOLEKSI to entitas.koleksiId,
+                    UploadWorker.K_TOPIK to entitas.topicId,
+                    UploadWorker.K_WORK_ID to workId,
+                    UploadWorker.K_LANJUTAN to true,
+                ),
+            )
+            .setConstraints(UploadWorker.batasJaringan(hanyaWifi))
+            .addTag(pekerjaan)
+            .addTag(TAG_UNGGAH)
+            .build()
+        // Cancel eksplisit dulu (jika masih RUNNING karena race condition),
+        // lalu enqueue REPLACE agar dijadwalkan segera tanpa backoff.
+        workManager.cancelUniqueWork(pekerjaan)
+        workManager.enqueueUniqueWork(pekerjaan, ExistingWorkPolicy.REPLACE, permintaanBaru)
     }
 
     /** Mengamati status jeda pekerjaan unggah; false bila belum pernah dicatat. */
@@ -1618,6 +1668,14 @@ class ArsipRepository(
 
         /** Tag bersama untuk semua pekerjaan unggah (dipantau layar Unggah). */
         const val TAG_UNGGAH = "antrean-unggah"
+
+        /**
+         * Tentukan apakah WorkRequest perlu didaftarkan ulang saat "lanjutkan" ditekan.
+         * Hanya JANGAN daftarkan ulang bila sudah ada state SUCCEEDED (berkas sudah terkirim penuh).
+         * Untuk state ENQUEUED/RUNNING/BLOCKED/FAILED/CANCELLED/daftar kosong → daftarkan ulang.
+         */
+        fun perluDaftarkanUlang(states: List<WorkInfo.State>): Boolean =
+            states.none { it == WorkInfo.State.SUCCEEDED }
 
         /** Nama kerja unik unduhan satu berkas. */
         fun namaKerjaUnduh(berkasId: String) = "unduh-$berkasId"
