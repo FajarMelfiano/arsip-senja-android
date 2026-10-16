@@ -788,7 +788,7 @@ private fun DialogPindaiDuplikat(
                         items(daftar) { grup ->
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
-                                color = WarnaArsip.Latar,
+                                color = WarnaArsip.Permukaan,
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
                                 Column(modifier = Modifier.padding(12.dp)) {

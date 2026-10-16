@@ -193,7 +193,7 @@ class UploadWorker(
                     var mentah = dikonfirmasi.pesan.keBerkasMentah()
                     if (mentah != null && mentah.ukuran == 0L && mentah.tdFileId > 0) {
                         val ukuranSegar = runCatching {
-                            telegram.ambilFile(mentah.tdFileId).ukuranTotal()
+                            telegram.ambilFile(mentah.tdFileId).size
                         }.getOrNull() ?: 0L
                         if (ukuranSegar > 0L) {
                             mentah = mentah.copy(ukuran = ukuranSegar)

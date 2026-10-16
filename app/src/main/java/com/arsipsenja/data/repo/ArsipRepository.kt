@@ -117,9 +117,6 @@ class ArsipRepository(
 
     // ---- Vault ----
 
-    /** Kandidat grup vault untuk dipilih pengguna di Pengaturan. */
-    typealias KandidatVault = com.arsipsenja.data.repo.KandidatVault
-
     /**
      * Daftar supergroup (bukan channel) milik sendiri; tiap grup dites
      * dukung forum atau tidak.
@@ -759,7 +756,7 @@ class ArsipRepository(
             val entitasKoleksi = koleksiDao.ambil(kunci.chatId, kunci.topicId)
             val dikenal = if (entitasKoleksi == null) {
                 false
-            } else if (PenandaImpor.adalahImpor(entitasKoleksi)) {
+            } else if (entitasKoleksi.asalImpor) {
                 // Lazy subscribe: koleksi impor hanya di-ingest bila pernah dibuka pengguna
                 koleksiImporDikenalRealtime.contains(kunci)
             } else {
@@ -1665,7 +1662,7 @@ class ArsipRepository(
     private suspend fun pastikanUkuran(b: BerkasMentah): BerkasMentah {
         if (b.ukuran > 0L || b.tdFileId <= 0) return b
         val ukuranSegar = runCatching {
-            telegram.ambilFile(b.tdFileId).ukuranTotal()
+            telegram.ambilFile(b.tdFileId).size
         }.getOrNull() ?: 0L
         return if (ukuranSegar > 0L) b.copy(ukuran = ukuranSegar) else b
     }
