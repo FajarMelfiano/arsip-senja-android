@@ -52,6 +52,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.drinkless.tdlib.TdApi
 
@@ -1346,8 +1347,9 @@ class ArsipRepository(
         if (entitas.uri.isBlank() || entitas.koleksiId == 0L) return
 
         // Cek state WorkManager: jangan daftarkan ulang bila sudah SUCCEEDED
-        val states = workManager.getWorkInfosForUniqueWork("unggah-$workId").get()
-            .map { it.state }
+        val states = withContext(Dispatchers.IO) {
+            workManager.getWorkInfosForUniqueWork("unggah-$workId").get()
+        }.map { it.state }
         if (!perluDaftarkanUlang(states)) return
 
         val hanyaWifi = pengaturan.hanyaWifi.first()
