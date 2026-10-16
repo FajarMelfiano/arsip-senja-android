@@ -334,14 +334,14 @@ class UnggahViewModel(
     fun workIdDariInfo(info: WorkInfo): String? =
         info.tags.firstOrNull { it.startsWith("unggah-") }?.removePrefix("unggah-")
 
-    /** Jeda manual pekerjaan unggah; status tersimpan persisten di Room. */
+    /** Jeda manual pekerjaan unggah: tandai di Room DAN batalkan work segera. */
     fun jedaUnggah(workId: String) {
-        viewModelScope.launch { repo.setJedaUnggah(workId, true) }
+        viewModelScope.launch { repo.jedaUnggah(workId) }
     }
 
-    /** Lanjutkan pekerjaan unggah yang sedang dijeda. */
+    /** Lanjutkan pekerjaan unggah yang sedang dijeda — mulai seketika tanpa backoff. */
     fun lanjutkanUnggah(workId: String) {
-        viewModelScope.launch { repo.setJedaUnggah(workId, false) }
+        viewModelScope.launch { repo.lanjutkanUnggah(workId) }
     }
 
     /** Tandai/hapus tanda prioritas satu pekerjaan unggah. */

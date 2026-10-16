@@ -192,9 +192,19 @@ val MIGRASI_6_7 = object : Migration(6, 7) {
     }
 }
 
+// Menambahkan kolom parameter enqueue (uri, koleksiId, topicId) ke tabel jeda
+// agar "lanjutkan seketika" bisa membangun ulang WorkRequest tanpa membaca inputData.
+val MIGRASI_7_8 = object : Migration(7, 8) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `upload_queue_pause` ADD COLUMN `uri` TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE `upload_queue_pause` ADD COLUMN `koleksiId` INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE `upload_queue_pause` ADD COLUMN `topicId` INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
 @Database(
     entities = [BerkasArsipEntity::class, KoleksiEntity::class, TautanEntity::class, UploadQueuePauseEntity::class],
-    version = 7,
+    version = 8,
     exportSchema = true,
 )
 abstract class ArsipDatabase : RoomDatabase() {
@@ -222,6 +232,7 @@ abstract class ArsipDatabase : RoomDatabase() {
                         MIGRASI_4_5,
                         MIGRASI_5_6,
                         MIGRASI_6_7,
+                        MIGRASI_7_8,
                     )
                     .build()
                     .also { instance = it }
