@@ -96,11 +96,11 @@ class AturanDuplikatTest {
 
     @Test
     fun bedaNamaUkuranTopikAtauKoleksiTidakDikelompokkan() {
-        val b1 = buatBerkas(id = "1:1", messageId = 1L, chatId = -1001L, topicId = 1, nama = "a.txt", ukuran = 100L)
-        val b2 = buatBerkas(id = "1:2", messageId = 2L, chatId = -1001L, topicId = 1, nama = "b.txt", ukuran = 100L)
-        val b3 = buatBerkas(id = "1:3", messageId = 3L, chatId = -1001L, topicId = 1, nama = "a.txt", ukuran = 200L)
-        val b4 = buatBerkas(id = "1:4", messageId = 4L, chatId = -1001L, topicId = 2, nama = "a.txt", ukuran = 100L)
-        val b5 = buatBerkas(id = "1:5", messageId = 5L, chatId = -1002L, topicId = 1, nama = "a.txt", ukuran = 100L)
+        val b1 = buatBerkas(id = "1:1", messageId = 1L, chatId = -1001L, koleksiId = null, topicId = 1, nama = "a.txt", ukuran = 100L)
+        val b2 = buatBerkas(id = "1:2", messageId = 2L, chatId = -1001L, koleksiId = null, topicId = 1, nama = "b.txt", ukuran = 100L)
+        val b3 = buatBerkas(id = "1:3", messageId = 3L, chatId = -1001L, koleksiId = null, topicId = 1, nama = "a.txt", ukuran = 200L)
+        val b4 = buatBerkas(id = "1:4", messageId = 4L, chatId = -1001L, koleksiId = null, topicId = 2, nama = "a.txt", ukuran = 100L)
+        val b5 = buatBerkas(id = "1:5", messageId = 5L, chatId = -1002L, koleksiId = null, topicId = 1, nama = "a.txt", ukuran = 100L)
 
         val grup = AturanDuplikat.kelompokkan(listOf(b1, b2, b3, b4, b5))
 
