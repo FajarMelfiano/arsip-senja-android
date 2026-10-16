@@ -6,6 +6,7 @@ import com.arsipsenja.data.local.PengaturanStore
 import com.arsipsenja.data.local.StatistikBerkas
 import com.arsipsenja.data.repo.ArsipRepository
 import com.arsipsenja.data.repo.GrupDuplikat
+import com.arsipsenja.data.repo.KandidatVault
 import com.arsipsenja.data.repo.PenjagaVault
 import com.arsipsenja.data.repo.StatusRealtime
 import com.arsipsenja.data.telegram.StatusOtorisasi
@@ -55,8 +56,8 @@ class PengaturanViewModel(
     val vaultAktif: StateFlow<Long?> = _vaultAktif.asStateFlow()
 
     private val _kandidatVault =
-        MutableStateFlow<List<ArsipRepository.KandidatVault>>(emptyList())
-    val kandidatVault: StateFlow<List<ArsipRepository.KandidatVault>> =
+        MutableStateFlow<List<KandidatVault>>(emptyList())
+    val kandidatVault: StateFlow<List<KandidatVault>> =
         _kandidatVault.asStateFlow()
 
     private val _memuatVault = MutableStateFlow(false)

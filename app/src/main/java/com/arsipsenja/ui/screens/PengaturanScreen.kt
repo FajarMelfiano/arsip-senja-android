@@ -48,6 +48,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.arsipsenja.BuildConfig
 import com.arsipsenja.data.repo.ArsipRepository
 import com.arsipsenja.data.repo.GrupDuplikat
+import com.arsipsenja.data.repo.KandidatVault
 import com.arsipsenja.data.telegram.StatusOtorisasi
 import com.arsipsenja.ui.components.ChipArsip
 import com.arsipsenja.ui.components.KolomIsian
@@ -601,7 +602,7 @@ private fun BarisLabel(label: String, nilai: String) {
  */
 @Composable
 private fun DialogPilihGrup(
-    kandidat: List<ArsipRepository.KandidatVault>,
+    kandidat: List<KandidatVault>,
     memuat: Boolean,
     galat: String?,
     vaultAktif: Long?,
