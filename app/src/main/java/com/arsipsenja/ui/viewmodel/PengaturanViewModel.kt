@@ -2,6 +2,7 @@ package com.arsipsenja.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.arsipsenja.data.local.LogKonflikEntity
 import com.arsipsenja.data.local.PengaturanStore
 import com.arsipsenja.data.local.StatistikBerkas
 import com.arsipsenja.data.repo.ArsipRepository
@@ -20,6 +21,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
@@ -257,6 +259,184 @@ class PengaturanViewModel(
 
     fun habiskanPesanVault() {
         _pesanVault.value = null
+    }
+
+    fun putuskanVault() {
+        viewModelScope.launch {
+            _memuatVault.value = true
+            try {
+                repo.putuskanVault()
+                _vaultAktif.value = null
+                _infoVault.value = null
+                _pesanVault.value = PesanStatus(
+                    NadaStatus.INFO,
+                    "Vault diputuskan. Pilih grup lain atau siapkan vault baru.",
+                )
+            } catch (e: Exception) {
+                _pesanVault.value = PesanStatus(
+                    NadaStatus.GALAT,
+                    "Gagal memutuskan vault: ${e.message}",
+                )
+            } finally {
+                _memuatVault.value = false
+            }
+        }
+    }
+
+    // ---- Wizard "Siapkan Vault" (Paket A1) ----
+
+    /**
+     * Alur satu tombol: CARI vault lama milik sendiri → (tidak ada) BUAT grup
+     * baru → AKTIFKAN mode forum → VERIFIKASI siap pakai. Tiap langkah punya
+     * indikator status dan tombol "Coba lagi" bila gagal; pembuatan grup baru
+     * TIDAK otomatis — menunggu ketukan pengguna setelah pencarian kosong.
+     */
+    enum class LangkahWizard(val judul: String, val keterangan: String) {
+        CARI("Cari vault lama", "Mencari grup forum milikmu yang sudah ada"),
+        BUAT("Buat grup vault", "Membuat grup supergroup privat baru"),
+        AKTIFKAN("Aktifkan mode forum", "Mengaktifkan topik di grup"),
+        VERIFIKASI("Verifikasi", "Memastikan vault siap dipakai"),
+    }
+
+    enum class StatusLangkah { MENUNGGU, BERJALAN, BERHASIL, GAGAL }
+
+    data class StatusWizard(
+        val tampil: Boolean = false,
+        val namaGrup: String = "Arsip Senja",
+        val status: Map<LangkahWizard, StatusLangkah> =
+            LangkahWizard.entries.associateWith { StatusLangkah.MENUNGGU },
+        val galat: Map<LangkahWizard, String?> = emptyMap(),
+        val chatId: Long? = null,
+        val namaDipilih: String = "",
+        val selesai: Boolean = false,
+    )
+
+    private val _wizard = MutableStateFlow(StatusWizard())
+    val wizard: StateFlow<StatusWizard> = _wizard.asStateFlow()
+
+    fun mulaiWizardVault() {
+        _wizard.value = StatusWizard(tampil = true)
+        jalankanLangkahWizard(LangkahWizard.CARI)
+    }
+
+    fun tutupWizardVault() {
+        _wizard.value = _wizard.value.copy(tampil = false)
+        muatVaultAktif()
+        muatInfoVault()
+    }
+
+    fun setNamaGrupWizard(nama: String) {
+        _wizard.update { it.copy(namaGrup = nama) }
+    }
+
+    fun cobaLagiLangkahWizard(langkah: LangkahWizard) {
+        jalankanLangkahWizard(langkah)
+    }
+
+    private fun setStatusLangkah(
+        langkah: LangkahWizard,
+        status: StatusLangkah,
+        galat: String? = null,
+    ) {
+        _wizard.update { w ->
+            w.copy(
+                status = w.status + (langkah to status),
+                galat = if (galat != null) w.galat + (langkah to galat) else w.galat,
+            )
+        }
+    }
+
+    private fun jalankanLangkahWizard(langkah: LangkahWizard) {
+        if (_wizard.value.status[langkah] == StatusLangkah.BERJALAN) return
+        setStatusLangkah(langkah, StatusLangkah.BERJALAN)
+        viewModelScope.launch {
+            try {
+                when (langkah) {
+                    LangkahWizard.CARI -> {
+                        val daftar = repo.deteksiVaultMilikSendiri()
+                        val kandidat = daftar.firstOrNull { it.forumSiap }
+                            ?: daftar.firstOrNull()
+                        if (kandidat != null) {
+                            setStatusLangkah(LangkahWizard.CARI, StatusLangkah.BERHASIL)
+                            // Vault lama ditemukan — lewati pembuatan.
+                            setStatusLangkah(LangkahWizard.BUAT, StatusLangkah.BERHASIL)
+                            _wizard.update {
+                                it.copy(chatId = kandidat.chatId, namaDipilih = kandidat.nama)
+                            }
+                            jalankanLangkahWizard(LangkahWizard.AKTIFKAN)
+                        } else {
+                            // Tidak ada: BERHASIL dengan arti "pencarian selesai,
+                            // tidak ada yang bisa diadopsi". Pembuatan grup
+                            // menunggu ketukan pengguna (tombol di dialog).
+                            setStatusLangkah(LangkahWizard.CARI, StatusLangkah.BERHASIL)
+                        }
+                    }
+                    LangkahWizard.BUAT -> {
+                        val hasil = repo.buatVaultBaru(_wizard.value.namaGrup.trim().ifBlank { "Arsip Senja" })
+                        setStatusLangkah(LangkahWizard.BUAT, StatusLangkah.BERHASIL)
+                        _wizard.update {
+                            it.copy(chatId = hasil.chatId, namaDipilih = hasil.nama)
+                        }
+                        jalankanLangkahWizard(LangkahWizard.AKTIFKAN)
+                    }
+                    LangkahWizard.AKTIFKAN -> {
+                        val chatId = _wizard.value.chatId
+                            ?: throw TelegramException("Grup vault belum ditentukan.")
+                        repo.pilihVault(chatId)
+                        setStatusLangkah(LangkahWizard.AKTIFKAN, StatusLangkah.BERHASIL)
+                        jalankanLangkahWizard(LangkahWizard.VERIFIKASI)
+                    }
+                    LangkahWizard.VERIFIKASI -> {
+                        val info = repo.infoVaultAktif()
+                        if (info.forumSiap) {
+                            setStatusLangkah(LangkahWizard.VERIFIKASI, StatusLangkah.BERHASIL)
+                            _wizard.update { it.copy(selesai = true, namaDipilih = info.nama) }
+                        } else {
+                            throw TelegramException(
+                                info.masalah ?: "Vault belum siap dipakai.",
+                            )
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                setStatusLangkah(
+                    langkah,
+                    StatusLangkah.GAGAL,
+                    e.message ?: "Gagal tanpa keterangan.",
+                )
+            }
+        }
+    }
+
+    // ---- Kesehatan vault & sinkron (A2/B1/B2/B3) ----
+
+    /** (sehat, dicekPada, masalah) terakhir dari worker cek berkala. */
+    val kesehatanVault: StateFlow<Triple<Boolean?, Long?, String?>> =
+        repo.amatiKesehatanVault()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), Triple(null, null, null))
+
+    /** Jumlah operasi menunggu sinkron — indikator "menunggu sinkron". */
+    val operasiTertunda: StateFlow<Int> =
+        repo.amatiOperasiTertunda()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+
+    /** 50 konflik sinkron terakhir untuk layar "Log Konflik". */
+    val logKonflik: StateFlow<List<LogKonflikEntity>> =
+        repo.amatiLogKonflik()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val jedaBaterai: StateFlow<Boolean> = pengaturan.jedaBateraiRendah
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+
+    val jedaSeluler: StateFlow<Boolean> = pengaturan.jedaDataSeluler
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    fun setJedaBaterai(aktif: Boolean) {
+        viewModelScope.launch { pengaturan.setJedaBateraiRendah(aktif) }
+    }
+
+    fun setJedaSeluler(aktif: Boolean) {
+        viewModelScope.launch { pengaturan.setJedaDataSeluler(aktif) }
     }
 
     private val _adaKredensial = MutableStateFlow(pengaturan.adaKredensial())

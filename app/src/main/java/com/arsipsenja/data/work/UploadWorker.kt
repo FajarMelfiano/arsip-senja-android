@@ -1,7 +1,10 @@
 package com.arsipsenja.data.work
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
+import android.os.BatteryManager
 import android.os.StatFs
 import android.util.Log
 import androidx.work.Constraints
@@ -10,6 +13,7 @@ import androidx.work.NetworkType
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.arsipsenja.ArsipSenjaApp
+import com.arsipsenja.data.repo.AturanJedaOtomatis
 import com.arsipsenja.data.repo.PenjagaVault
 import com.arsipsenja.data.telegram.keBerkasMentah
 import com.arsipsenja.data.telegram.keEntity
@@ -41,6 +45,39 @@ class UploadWorker(
     private val percobaanKe = params.runAttemptCount
 
     /**
+     * B3: tentukan apakah unggahan harus dijeda otomatis. Membaca level
+     * baterai via BatteryManager dan jenis jaringan via ConnectivityManager,
+     * lalu menerapkan [AturanJedaOtomatis] sesuai toggle pengguna.
+     * Toggle yang dimatikan = kondisi tidak diperiksa sama sekali.
+     */
+    private suspend fun cekJedaOtomatis(): AturanJedaOtomatis.Alasan? {
+        val pengaturan = (applicationContext as ArsipSenjaApp).wadah.pengaturan
+        val jedaBateraiAktif = pengaturan.jedaBateraiRendah.first()
+        val jedaSelulerAktif = pengaturan.jedaDataSeluler.first()
+        if (!jedaBateraiAktif && !jedaSelulerAktif) return null
+
+        val bateraiPersen: Int? = if (jedaBateraiAktif) {
+            val bm = applicationContext.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+            bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)?.takeIf { it in 1..100 }
+        } else {
+            null
+        }
+        val diDataSeluler = if (jedaSelulerAktif) {
+            val cm = applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            val kapabilitas = cm?.activeNetwork?.let { cm.getNetworkCapabilities(it) }
+            kapabilitas?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true
+        } else {
+            false
+        }
+        return AturanJedaOtomatis.harusJeda(
+            bateraiPersen = bateraiPersen,
+            diDataSeluler = diDataSeluler,
+            jedaBateraiAktif = jedaBateraiAktif,
+            jedaSelulerAktif = jedaSelulerAktif,
+        )
+    }
+
+    /**
      * Bungkus [kerjakan]: kegagalan yang lolos dari jalur dalam (mis.
      * pengecualian tak tertangkap) tetap membawa pesan galat di outputData,
      * agar UI bisa menampilkan alasan gagalnya — bukan hanya ID pekerjaan.
@@ -60,6 +97,14 @@ class UploadWorker(
             // Status jeda sudah terekspos ke UI lewat Room (amatiJedaUnggah),
             // jadi tidak perlu outputData tambahan di sini.
             if (repo.sedangJeda(workId)) {
+                return Result.retry()
+            }
+            // B3: jeda otomatis saat baterai rendah / data seluler, sesuai
+            // toggle di Pengaturan. Result.retry() = lanjut otomatis saat
+            // kondisi pulih (WorkManager menjadwalkan ulang dengan backoff).
+            val alasanJeda = cekJedaOtomatis()
+            if (alasanJeda != null) {
+                Log.i(tag, "Unggah dijeda otomatis: ${AturanJedaOtomatis.pesanAlasan(alasanJeda)}")
                 return Result.retry()
             }
             kerjakan()

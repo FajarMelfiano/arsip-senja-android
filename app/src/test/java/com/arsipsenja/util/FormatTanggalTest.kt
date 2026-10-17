@@ -33,4 +33,19 @@ class FormatTanggalTest {
         assertThat(nomorKatalog(24)).isEqualTo("No. 024")
         assertThat(nomorKatalog(1234)).isEqualTo("No. 1234")
     }
+
+    @Test
+    fun `format relatif belum pernah dicek`() {
+        assertThat(formatRelatif(0)).isEqualTo("belum pernah dicek")
+        assertThat(formatRelatif(-5)).isEqualTo("belum pernah dicek")
+    }
+
+    @Test
+    fun `format relatif menit jam hari`() {
+        val sekarang = 1_000_000_000_000L
+        assertThat(formatRelatif(sekarang - 30_000, sekarang)).isEqualTo("baru saja")
+        assertThat(formatRelatif(sekarang - 5 * 60_000, sekarang)).isEqualTo("5 menit lalu")
+        assertThat(formatRelatif(sekarang - 3 * 3_600_000, sekarang)).isEqualTo("3 jam lalu")
+        assertThat(formatRelatif(sekarang - 2 * 86_400_000, sekarang)).isEqualTo("2 hari lalu")
+    }
 }

@@ -214,4 +214,37 @@ class PenjagaVaultTest {
         assertTrue(pesan.contains("bukan grup"))
         assertTrue(pesan.contains("manual"))
     }
+
+    // ---- A3: vault bertipe salah butuh diganti, bukan diperbaiki ----
+
+    @Test
+    fun butuhGantiBukanPerbaikiUntukChannel() {
+        assertTrue(
+            PenjagaVault.butuhGantiBukanPerbaiki(
+                "Vault bertipe channel, bukan grup.",
+            ),
+        )
+    }
+
+    @Test
+    fun butuhGantiBukanPerbaikiUntukBukanSupergroup() {
+        assertTrue(
+            PenjagaVault.butuhGantiBukanPerbaiki("Vault ini bukan supergroup."),
+        )
+    }
+
+    @Test
+    fun tidakButuhGantiUntukMasalahForumBiasa() {
+        assertFalse(
+            PenjagaVault.butuhGantiBukanPerbaiki(
+                "Mode forum gagal diaktifkan. Coba lagi.",
+            ),
+        )
+    }
+
+    @Test
+    fun tidakButuhGantiUntukMasalahKosong() {
+        assertFalse(PenjagaVault.butuhGantiBukanPerbaiki(null))
+        assertFalse(PenjagaVault.butuhGantiBukanPerbaiki(""))
+    }
 }

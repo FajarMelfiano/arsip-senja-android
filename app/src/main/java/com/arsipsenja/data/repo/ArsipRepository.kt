@@ -10,14 +10,18 @@ import androidx.work.WorkManager
 import androidx.work.workDataOf
 import com.arsipsenja.data.local.ArsipDatabase
 import com.arsipsenja.data.local.BerkasArsipEntity
+import com.arsipsenja.data.local.JenisOperasi
 import com.arsipsenja.data.local.JenisTautan
 import com.arsipsenja.data.local.KoleksiEntity
 import com.arsipsenja.data.local.KueriTampilan
 import com.arsipsenja.data.local.KunciBaru
 import com.arsipsenja.data.local.KunciKoleksi
 import com.arsipsenja.data.local.KunciRahasia
+import com.arsipsenja.data.local.LogKonflikEntity
+import com.arsipsenja.data.local.OperasiTertundaEntity
 import com.arsipsenja.data.local.PengaturanStore
 import com.arsipsenja.data.local.PenandaImpor
+import com.arsipsenja.data.local.StatusOperasi
 import com.arsipsenja.data.local.UploadQueuePauseEntity
 import com.arsipsenja.data.local.StatistikBerkas
 import com.arsipsenja.data.local.TautanEntity
@@ -28,12 +32,15 @@ import com.arsipsenja.data.telegram.BerkasMentah
 import com.arsipsenja.data.telegram.keBerkasMentah
 import com.arsipsenja.data.telegram.keEntity
 import com.arsipsenja.data.work.DownloadWorker
+import com.arsipsenja.data.work.SinkronOperasiWorker
 import com.arsipsenja.data.work.UploadWorker
+import com.arsipsenja.data.work.VaultHealthWorker
 import com.arsipsenja.util.TipeFile
 import com.arsipsenja.util.captionTanpaHeader
 import android.provider.OpenableColumns
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -45,6 +52,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
@@ -133,12 +141,22 @@ class ArsipRepository(
             .getOrDefault(emptyList())
             // Hasil SearchChats juga wajib milik sendiri (fail-closed):
             // tanpa saringan ini grup orang lain bisa teradopsi otomatis.
-            .filter { chat ->
-                runCatching { telegram.apakahPemilik(chat.id) }.getOrDefault(false)
+            .mapNotNull { chat ->
+                val peran = runCatching { telegram.peranDiChat(chat.id) }
+                    .getOrDefault(PeranPenggunaChat.TAK_DIKETAHUI)
+                if (AturanDeteksiVault.adalahPemilikAtauAdmin(peran)) chat to peran else null
             }
-        val grup = (telegram.daftarSupergroup() + dariPencarian)
-            .distinctBy { it.id }
-        return grup.map { chat ->
+        // Paket A4: grup diambil BESERTA peran (pemilik/admin) lalu
+        // disaring fail-closed via AturanDeteksiVault — hanya grup milik
+        // sendiri yang tampil, lengkap dengan badge peran di UI. Grup
+        // orang lain disembunyikan total, bukan sekadar tanpa badge.
+        // Channel lama tetap disertakan seperti sebelumnya (pengguna
+        // vault channel lama bisa melihatnya; memilihnya tetap ditolak
+        // jujur oleh pilihVault).
+        val semua = (telegram.daftarSupergroupDenganPeran() + dariPencarian)
+            .distinctBy { it.first.id }
+            .filter { (_, peran) -> AturanDeteksiVault.adalahPemilikAtauAdmin(peran) }
+        return semua.map { (chat, peran) ->
             val siap = try {
                 telegram.daftarTopik(chat.id)
                 true
@@ -150,8 +168,229 @@ class ArsipRepository(
                 chatId = chat.id,
                 nama = chat.title.orEmpty().ifBlank { "Grup ${chat.id}" },
                 forumSiap = siap,
+                peran = peran,
             )
         }
+    }
+
+    /** Putuskan vault aktif (Paket A3): hapus pilihan tanpa menghapus grup. */
+    suspend fun putuskanVault() {
+        pengaturan.setVaultChatId(null)
+    }
+
+    // ---- Operasi tertunda & konflik (Paket B1/B2) ----
+
+    private val operasiDao = db.operasiTertundaDao()
+    private val konflikDao = db.logKonflikDao()
+
+    /** Jumlah operasi menunggu sinkron — indikator UI "menunggu sinkron". */
+    fun amatiOperasiTertunda(): Flow<Int> = operasiDao.hitungTertunda()
+
+    /** 50 konflik terakhir untuk layar "Log Konflik" di Pengaturan. */
+    fun amatiLogKonflik(): Flow<List<LogKonflikEntity>> = konflikDao.amatiTerbaru()
+
+    /** Jadwalkan cek kesehatan vault berkala (Paket A2). Aman dipanggil berulang. */
+    fun jadwalkanCekVaultBerkala() {
+        VaultHealthWorker.jadwalkan(workManager)
+    }
+
+    /** Simpan hasil cek kesehatan vault dari [VaultHealthWorker]. */
+    suspend fun simpanHasilCekVault(sehat: Boolean, masalah: String?, dicekPada: Long) {
+        pengaturan.simpanHasilCekVault(sehat, masalah, dicekPada)
+    }
+
+    /** Hasil cek kesehatan terakhir untuk UI: (sehat, dicekPada, masalah). */
+    fun amatiKesehatanVault(): Flow<Triple<Boolean?, Long?, String?>> = combine(
+        pengaturan.vaultSehatTerakhir,
+        pengaturan.vaultDicekPada,
+        pengaturan.vaultMasalahTerakhir,
+    ) { sehat, dicek, masalah -> Triple(sehat, dicek, masalah) }
+
+    /** Terapkan ulang sisa operasi tertunda dari sesi sebelumnya (dipanggil saat mulai). */
+    fun jadwalkanUlangSisaOperasi() {
+        SinkronOperasiWorker.antrekanSekali(workManager)
+    }
+
+    /**
+     * Catat operasi mutasi ke log sebelum dijalankan. Mengembalikan ID
+     * operasi untuk ditandai SELESAI setelah remote + lokal berhasil.
+     */
+    private suspend fun catatOperasi(
+        jenis: String,
+        targetId: String,
+        payload: Map<String, String>,
+    ): String {
+        val id = UUID.randomUUID().toString()
+        operasiDao.sisip(
+            OperasiTertundaEntity(
+                id = id,
+                jenis = jenis,
+                targetId = targetId,
+                payloadJson = kodePayload(payload),
+                status = StatusOperasi.PENDING,
+                dibuatPada = System.currentTimeMillis(),
+                percobaan = 0,
+            ),
+        )
+        SinkronOperasiWorker.antrekanSekali(workManager)
+        return id
+    }
+
+    /**
+     * Terapkan ulang semua operasi PENDING secara idempoten. Dipanggil oleh
+     * [SinkronOperasiWorker]. Gagal jaringan → tetap PENDING untuk dicoba
+     * lagi; setelah 10x gagal ditandai GAGAL agar tidak berputar selamanya.
+     */
+    suspend fun terapkanOperasiTertunda() {
+        val daftar = operasiDao.ambilTertunda()
+        for (op in daftar) {
+            try {
+                terapkanSatuOperasi(op)
+                operasiDao.ubahStatus(op.id, StatusOperasi.SELESAI)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(tag, "Operasi ${op.id} (${op.jenis}) gagal diterapkan ulang: ${e.message}")
+                if (op.percobaan + 1 >= 10) {
+                    operasiDao.ubahStatus(op.id, StatusOperasi.GAGAL)
+                } else {
+                    operasiDao.tambahPercobaan(op.id)
+                }
+            }
+        }
+        // Housekeeping: riwayat selesai >30 hari dan konflik >90 hari dibersihkan.
+        val sekarang = System.currentTimeMillis()
+        operasiDao.hapusSelesaiLama(sekarang - 30L * 24 * 3600 * 1000)
+        konflikDao.hapusLama(sekarang - 90L * 24 * 3600 * 1000)
+    }
+
+    /** Terapkan satu operasi tertunda; idempoten per jenis. */
+    private suspend fun terapkanSatuOperasi(op: OperasiTertundaEntity) {
+        val payload = dekodePayload(op.payloadJson)
+        val (chatId, topicId) = op.targetId.split(":").let { it[0].toLong() to it[1].toInt() }
+        when (op.jenis) {
+            JenisOperasi.UBAH_KOLEKSI -> {
+                val nama = payload["nama"].orEmpty()
+                require(nama.isNotBlank()) { "Payload UBAH_KOLEKSI tanpa nama." }
+                if (topicId != 0) {
+                    telegram.ubahTopik(chatId, topicId, nama)
+                } else {
+                    telegram.ubahJudul(chatId, nama)
+                    telegram.ubahDeskripsi(chatId, payload["deskripsi"].orEmpty())
+                }
+            }
+            JenisOperasi.HAPUS_KOLEKSI -> {
+                // Idempoten: target yang sudah hilang (404) dianggap selesai.
+                if (topicId != 0) {
+                    runCatching { telegram.hapusTopik(chatId, topicId) }
+                } else if (payload["tinggalkanChannel"] == "1") {
+                    runCatching { telegram.tinggalkanChannel(chatId) }
+                }
+            }
+            JenisOperasi.BUAT_KOLEKSI -> {
+                val nama = payload["nama"].orEmpty()
+                require(nama.isNotBlank()) { "Payload BUAT_KOLEKSI tanpa nama." }
+                // find-or-create: idempoten penuh; topik yang sudah ada
+                // dipakai ulang, tidak dibuat ganda.
+                pastikanTopikDenganPerbaikanForum(chatId, nama)
+            }
+            else -> Log.w(tag, "Jenis operasi tak dikenal: ${op.jenis}")
+        }
+    }
+
+    /**
+     * Selesaikan sengketa nama koleksi antara operasi lokal tertunda dan
+     * pembaruan realtime dari Telegram (Paket B2). Kebijakan last-write-wins
+     * via [AturanKonflik]; hasilnya SELALU dicatat ke log konflik agar
+     * pengguna bisa meninjau keputusan aplikasi.
+     */
+    private suspend fun selesaikanKonflikNamaKoleksi(
+        chatId: Long,
+        topicId: Int,
+        namaRemote: String,
+    ) {
+        val targetId = "$chatId:$topicId"
+        val tertunda = operasiDao.ambilTertunda().firstOrNull { it.targetId == targetId }
+        val entri = koleksiDao.ambil(chatId, topicId) ?: return
+        val baru = namaRemote.ifBlank { entri.nama }
+        if (tertunda == null) {
+            // Jalur normal: tidak ada operasi lokal yang diperebutkan.
+            if (baru != entri.nama) koleksiDao.simpan(entri.copy(nama = baru))
+            return
+        }
+        val keputusan = AturanKonflik.selesaikan(tertunda.dibuatPada, System.currentTimeMillis())
+        val sekarang = System.currentTimeMillis()
+        when (keputusan.pemenang) {
+            AturanKonflik.Pemenang.LOKAL -> {
+                // Pertahankan nama lokal; operasi tertunda akan mendorongnya
+                // ke Telegram saat jaringan pulih. Pembaruan remote diabaikan.
+                Log.i(tag, "Konflik $targetId dimenangkan operasi lokal; abaikan rename remote.")
+                konflikDao.catat(
+                    LogKonflikEntity(
+                        targetId = targetId,
+                        jenis = tertunda.jenis,
+                        pemenang = "LOKAL",
+                        alasan = keputusan.alasan,
+                        dicatatPada = sekarang,
+                    ),
+                )
+            }
+            AturanKonflik.Pemenang.REMOTE -> {
+                if (baru != entri.nama) koleksiDao.simpan(entri.copy(nama = baru))
+                operasiDao.ubahStatus(tertunda.id, StatusOperasi.DIBATALKAN)
+                konflikDao.catat(
+                    LogKonflikEntity(
+                        targetId = targetId,
+                        jenis = tertunda.jenis,
+                        pemenang = "REMOTE",
+                        alasan = keputusan.alasan,
+                        dicatatPada = sekarang,
+                    ),
+                )
+            }
+        }
+    }
+
+    /**
+     * Kodekan payload operasi ke string "kunci=nilai;kunci=nilai" dengan
+     * escaping agar nama/deskripsi yang mengandung ';', '=', '\' aman.
+     */
+    private fun kodePayload(nilai: Map<String, String>): String =
+        nilai.entries.joinToString(";") { (k, v) ->
+            k + "=" + v
+                .replace("\\", "\\\\")
+                .replace(";", "\\;")
+                .replace("=", "\\=")
+        }
+
+    /** Dekode hasil [kodePayload]; entri rusak dilewati, bukan gagal total. */
+    private fun dekodePayload(mentah: String): Map<String, String> {
+        if (mentah.isBlank()) return emptyMap()
+        val hasil = mutableMapOf<String, String>()
+        val kunci = StringBuilder()
+        val nilai = StringBuilder()
+        var diNilai = false
+        var lolos = false
+        fun simpan() {
+            if (kunci.isNotEmpty()) hasil[kunci.toString()] = nilai.toString()
+            kunci.clear()
+            nilai.clear()
+            diNilai = false
+        }
+        for (c in mentah) {
+            when {
+                lolos -> {
+                    (if (diNilai) nilai else kunci).append(c)
+                    lolos = false
+                }
+                c == '\\' -> lolos = true
+                c == '=' && !diNilai -> diNilai = true
+                c == ';' -> simpan()
+                else -> (if (diNilai) nilai else kunci).append(c)
+            }
+        }
+        simpan()
+        return hasil
     }
 
     suspend fun vaultTerpilih(): Long? = pengaturan.vaultSekarang()
@@ -812,24 +1051,25 @@ class ArsipRepository(
         }
     }
 
-    /** Refresh nama koleksi channel lama bila judulnya diubah di Telegram. */
+    /**
+     * Refresh nama koleksi channel lama bila judulnya diubah di Telegram.
+     * B2: bila ada rename lokal yang masih menunggu sinkron, sengketa
+     * diselesaikan via last-write-wins (bukan ditimpa diam-diam).
+     */
     private suspend fun kolektorJudulChat() {
         telegram.judulChatBerubah.collect { (chatId, judul) ->
-            val entri = koleksiDao.ambil(chatId, 0) ?: return@collect
-            val baru = judul.ifBlank { entri.nama }
-            if (baru != entri.nama) koleksiDao.simpan(entri.copy(nama = baru))
+            selesaikanKonflikNamaKoleksi(chatId, 0, judul)
         }
     }
 
     /**
      * Refresh nama koleksi topik yang SUDAH dikenal bila diubah di
      * Telegram. Topik asing tetap tidak membuat koleksi baru.
+     * B2: sengketa dengan rename lokal tertunda diselesaikan jujur.
      */
     private suspend fun kolektorInfoTopik() {
         telegram.infoTopikBerubah.collect { (chatId, topicId, nama) ->
-            val entri = koleksiDao.ambil(chatId, topicId) ?: return@collect
-            val baru = nama.ifBlank { entri.nama }
-            if (baru != entri.nama) koleksiDao.simpan(entri.copy(nama = baru))
+            selesaikanKonflikNamaKoleksi(chatId, topicId, nama)
         }
     }
 
@@ -870,6 +1110,27 @@ class ArsipRepository(
                 baru.caption == lama.deskripsi
             ) {
                 return@collect
+            }
+            // B2: jangan timpa diam-diam bila ada operasi lokal tertunda
+            // untuk berkas ini — sengketa diselesaikan jujur.
+            if (operasiDao.adaTertundaUntuk(id)) {
+                val tertunda = operasiDao.ambilTertunda().first { it.targetId == id }
+                val keputusan = AturanKonflik.selesaikan(tertunda.dibuatPada, System.currentTimeMillis())
+                if (keputusan.pemenang == AturanKonflik.Pemenang.LOKAL) {
+                    Log.i(tag, "Konflik berkas $id dimenangkan operasi lokal; abaikan edit remote.")
+                } else {
+                    operasiDao.ubahStatus(tertunda.id, StatusOperasi.DIBATALKAN)
+                }
+                konflikDao.catat(
+                    LogKonflikEntity(
+                        targetId = id,
+                        jenis = tertunda.jenis,
+                        pemenang = keputusan.pemenang.name,
+                        alasan = keputusan.alasan,
+                        dicatatPada = System.currentTimeMillis(),
+                    ),
+                )
+                if (keputusan.pemenang == AturanKonflik.Pemenang.LOKAL) return@collect
             }
             runCatching {
                 berkasDao.perbaruiDariTelegram(
@@ -951,6 +1212,13 @@ class ArsipRepository(
         // Pakai chatId dari hasil (bukan vault lama) agar tetap benar bila
         // vault basi diganti vault baru otomatis di dalam perbaikan forum.
         val chatId = topik.chatId
+        // B1: catat operasi SEBELUM tulis lokal — bila aplikasi mati di
+        // tengah jalan, worker menerapkan ulang pembuatan topik (idempoten).
+        val opId = catatOperasi(
+            JenisOperasi.BUAT_KOLEKSI,
+            "$chatId:${topik.topicId}",
+            mapOf("nama" to nama.trim()),
+        )
         val lama = koleksiDao.ambil(chatId, topik.topicId)
         val sekarang = System.currentTimeMillis()
         val labelBersih = label.trim().take(24).takeIf { it.isNotBlank() }
@@ -975,6 +1243,7 @@ class ArsipRepository(
             terakhirSinkron = lama?.terakhirSinkron ?: sekarang,
         )
         koleksiDao.simpan(koleksi)
+        operasiDao.ubahStatus(opId, StatusOperasi.SELESAI)
         return koleksi
     }
 
@@ -1244,12 +1513,21 @@ class ArsipRepository(
     ) {
         val namaBersih = nama.trim()
         require(namaBersih.isNotEmpty()) { "Nama koleksi kosong." }
+        // B1: catat dulu; bila remote gagal, operasi tetap PENDING dan
+        // worker mencoba lagi saat online.
+        val opId = catatOperasi(
+            JenisOperasi.UBAH_KOLEKSI,
+            "${kunci.chatId}:${kunci.topicId}",
+            mapOf("nama" to namaBersih, "deskripsi" to deskripsi),
+        )
         if (kunci.adalahTopik) {
             telegram.ubahTopik(kunci.chatId, kunci.topicId, namaBersih)
         } else {
             telegram.ubahJudul(kunci.chatId, namaBersih)
             telegram.ubahDeskripsi(kunci.chatId, deskripsi)
         }
+        // Remote berhasil = tersinkron; tulis lokal best-effort setelahnya.
+        operasiDao.ubahStatus(opId, StatusOperasi.SELESAI)
         val lama = koleksiDao.ambil(kunci.chatId, kunci.topicId) ?: return
         koleksiDao.simpan(
             lama.copy(
@@ -1268,15 +1546,25 @@ class ArsipRepository(
      * ditinggalkan bila [tinggalkanChannel] true.
      */
     suspend fun hapusKoleksi(kunci: KunciKoleksi, tinggalkanChannel: Boolean) {
-        if (kunci.adalahTopik) {
-            runCatching { telegram.hapusTopik(kunci.chatId, kunci.topicId) }
+        // B1: remote best-effort seperti sebelumnya; bila gagal, operasi
+        // tetap PENDING agar worker mencoba lagi (idempoten).
+        val opId = catatOperasi(
+            JenisOperasi.HAPUS_KOLEKSI,
+            "${kunci.chatId}:${kunci.topicId}",
+            mapOf("tinggalkanChannel" to if (tinggalkanChannel) "1" else "0"),
+        )
+        val remoteOk = if (kunci.adalahTopik) {
+            runCatching { telegram.hapusTopik(kunci.chatId, kunci.topicId) }.isSuccess
         } else if (tinggalkanChannel) {
-            runCatching { telegram.tinggalkanChannel(kunci.chatId) }
+            runCatching { telegram.tinggalkanChannel(kunci.chatId) }.isSuccess
+        } else {
+            true
         }
         berkasDao.hapusUntukKoleksi(kunci.chatId, kunci.topicId)
         tautanDao.hapusUntukKoleksi(kunci.chatId, kunci.topicId)
         koleksiDao.hapus(kunci.chatId, kunci.topicId)
         _koleksiTerbuka.value -= kunci
+        if (remoteOk) operasiDao.ubahStatus(opId, StatusOperasi.SELESAI)
     }
 
     suspend fun koleksiTerpilihAtauPertama(): KunciKoleksi? =

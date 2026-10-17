@@ -138,6 +138,54 @@ class PengaturanStore(private val context: Context) {
         store.edit { it[KUNCI_HANYA_WIFI] = aktif }
     }
 
+    // ---- Jeda otomatis antrean unggah (Paket B3) ----
+
+    /**
+     * True bila unggahan dijeda otomatis saat baterai di bawah
+     * [AturanJedaOtomatis.AMBANG_BATERAI_RENDAH] persen. Default true.
+     */
+    val jedaBateraiRendah: Flow<Boolean> =
+        store.data.map { p -> p[KUNCI_JEDA_BATERAI] ?: true }
+
+    suspend fun setJedaBateraiRendah(aktif: Boolean) {
+        store.edit { it[KUNCI_JEDA_BATERAI] = aktif }
+    }
+
+    /**
+     * True bila unggahan dijeda otomatis saat memakai data seluler.
+     * Default false — perilaku ini sudah tercakup toggle "Hanya WiFi",
+     * toggle ini untuk pengguna yang ingin jeda seluler TANPA membatasi
+     * ke WiFi saja (mis. tethering).
+     */
+    val jedaDataSeluler: Flow<Boolean> =
+        store.data.map { p -> p[KUNCI_JEDA_SELULER] ?: false }
+
+    suspend fun setJedaDataSeluler(aktif: Boolean) {
+        store.edit { it[KUNCI_JEDA_SELULER] = aktif }
+    }
+
+    // ---- Hasil cek kesehatan vault berkala (Paket A2) ----
+
+    /** Waktu cek kesehatan vault terakhir (epoch ms); null bila belum pernah. */
+    val vaultDicekPada: Flow<Long?> = store.data.map { p -> p[KUNCI_VAULT_DICEK] }
+
+    /** Hasil cek terakhir; null bila belum pernah dicek. */
+    val vaultSehatTerakhir: Flow<Boolean?> =
+        store.data.map { p -> p[KUNCI_VAULT_SEHAT] }
+
+    /** Penyebab masalah dari cek terakhir; null bila sehat/belum dicek. */
+    val vaultMasalahTerakhir: Flow<String?> =
+        store.data.map { p -> p[KUNCI_VAULT_MASALAH] }
+
+    suspend fun simpanHasilCekVault(sehat: Boolean, masalah: String?, dicekPada: Long) {
+        store.edit {
+            it[KUNCI_VAULT_SEHAT] = sehat
+            it[KUNCI_VAULT_DICEK] = dicekPada
+            if (masalah != null) it[KUNCI_VAULT_MASALAH] = masalah
+            else it.remove(KUNCI_VAULT_MASALAH)
+        }
+    }
+
     suspend fun perluBiometrik(): Boolean = biometrikAktif.first()
 
     suspend fun tampilanSekarang(): TampilanDasbor = tampilanDasbor.first()
@@ -287,6 +335,11 @@ class PengaturanStore(private val context: Context) {
         val KUNCI_BIOMETRIK = booleanPreferencesKey("biometrik_aktif")
         val KUNCI_VAULT = longPreferencesKey("vault_chat_id")
         val KUNCI_SINKRON_TERAKHIR = longPreferencesKey("sinkron_terakhir")
+        val KUNCI_JEDA_BATERAI = booleanPreferencesKey("jeda_baterai_rendah")
+        val KUNCI_JEDA_SELULER = booleanPreferencesKey("jeda_data_seluler")
+        val KUNCI_VAULT_DICEK = longPreferencesKey("vault_dicek_pada")
+        val KUNCI_VAULT_SEHAT = booleanPreferencesKey("vault_sehat_terakhir")
+        val KUNCI_VAULT_MASALAH = stringPreferencesKey("vault_masalah_terakhir")
         val KUNCI_GAGAL_DILAPORKAN = stringSetPreferencesKey("notifikasi_gagal_unggah")
         val KUNCI_RUTE_OTOMATIS = booleanPreferencesKey("rute_otomatis")
         val KUNCI_HANYA_WIFI = booleanPreferencesKey("hanya_wifi")

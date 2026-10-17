@@ -678,6 +678,26 @@ private fun tanganiOtorisasi(state: TdApi.AuthorizationState?) {
     }
 
     /**
+     * Peran pengguna di sebuah chat (Paket A4 — badge Pemilik/Admin di
+     * pemilih grup). Fail-closed: bila status tak bisa dibaca, kembalikan
+     * TAK_DIKETAHUI agar pemanggil bisa menyembunyikannya.
+     */
+    suspend fun peranDiChat(chatId: Long): PeranPenggunaChat {
+        val anggota = try {
+            kirim(
+                TdApi.GetChatMember().apply {
+                    this.chatId = chatId
+                    memberId = TdApi.MessageSenderUser(sayaId())
+                },
+            )
+        } catch (e: Exception) {
+            Log.w(tag, "Gagal membaca peran untuk chat $chatId", e)
+            return PeranPenggunaChat.TAK_DIKETAHUI
+        }
+        return peranDariStatus(anggota.status)
+    }
+
+    /**
      * Supergroup (bukan channel) MILIK SENDIRI (owner/admin) dari seluruh obrolan —
      * kandidat vault. Melakukan paginasi GetChats / LoadChats hingga tuntas agar grup lama
      * di luar 100 teratas tetap terdeteksi. Grup yang gagal diperiksa kepemilikannya
@@ -686,69 +706,7 @@ private fun tanganiOtorisasi(state: TdApi.AuthorizationState?) {
      * bukan daftar kosong yang menyesatkan.
      */
     suspend fun daftarSupergroup(): List<TdApi.Chat> {
-        val semuaChatId = linkedSetOf<Long>()
-        var putaran = 0
-        while (putaran < 50) {
-            putaran++
-            val adaLagi = try {
-                kirim(
-                    TdApi.LoadChats().apply {
-                        chatList = TdApi.ChatListMain()
-                        limit = 100
-                    },
-                )
-                true
-            } catch (e: Exception) {
-                // TDLib melempar 404 ketika seluruh obrolan sudah termuat
-                false
-            }
-
-            val batch = try {
-                kirim(
-                    TdApi.GetChats().apply {
-                        chatList = TdApi.ChatListMain()
-                        limit = 100
-                    },
-                )
-            } catch (e: Exception) {
-                null
-            }
-
-            if (batch == null || batch.chatIds.isEmpty()) {
-                if (!adaLagi) break
-            } else {
-                val sebelum = semuaChatId.size
-                semuaChatId.addAll(batch.chatIds.toList())
-                if (semuaChatId.size == sebelum && !adaLagi) break
-            }
-
-            if (!adaLagi) break
-        }
-
-        if (semuaChatId.isEmpty()) {
-            val fallback = runCatching {
-                kirim(
-                    TdApi.GetChats().apply {
-                        chatList = TdApi.ChatListMain()
-                        limit = 100
-                    },
-                )
-            }.getOrNull()
-            if (fallback != null) {
-                semuaChatId.addAll(fallback.chatIds.toList())
-            }
-        }
-
-        val supergroup = semuaChatId
-            .mapNotNull { id ->
-                try {
-                    kirim(TdApi.GetChat().apply { chatId = id })
-                } catch (e: Exception) {
-                    Log.w(tag, "Gagal memuat chat $id", e)
-                    null
-                }
-            }
-            .filter { layakDeteksiVault(it) }
+        val supergroup = muatSemuaSupergroup()
         var gagalPeriksa = 0
         val milikSendiri = supergroup.filter { chat ->
             try {
@@ -766,6 +724,102 @@ private fun tanganiOtorisasi(state: TdApi.AuthorizationState?) {
             )
         }
         return milikSendiri
+    }
+
+    /**
+     * Supergroup milik sendiri BESERTA peran (owner/admin) — untuk pemilih
+     * grup manual (Paket A4). Berbeda dengan [daftarSupergroup] yang hanya
+     * mengembalikan grup milik pemilik (dipakai alur otomatis yang butuh
+     * jaminan kepemilikan penuh), fungsi ini juga menyertakan grup tempat
+     * pengguna berstatus admin, dan pemanggil memfilter via
+     * [AturanDeteksiVault.saringKandidat] agar grup orang lain tetap
+     * disembunyikan total.
+     */
+    suspend fun daftarSupergroupDenganPeran(): List<Pair<TdApi.Chat, PeranPenggunaChat>> {
+        val supergroup = muatSemuaSupergroup()
+        val hasil = supergroup.mapNotNull { chat ->
+            val peran = try {
+                peranDiChat(chat.id)
+            } catch (e: Exception) {
+                Log.w(tag, "Gagal memeriksa peran grup ${chat.id}", e)
+                PeranPenggunaChat.TAK_DIKETAHUI
+            }
+            if (!AturanDeteksiVault.adalahPemilikAtauAdmin(peran)) null else chat to peran
+        }
+        if (supergroup.isNotEmpty() && hasil.isEmpty()) {
+            Log.w(tag, "Semua grup tersaring peran — kemungkinan semua pemeriksaan gagal.")
+        }
+        return hasil
+    }
+
+    /**
+     * Muat SELURUH supergroup/channel yang layak dideteksi (tanpa filter
+     * kepemilikan). Diekstrak dari [daftarSupergroup] agar logika paginasi
+     * hanya ada di satu tempat.
+     */
+    private suspend fun muatSemuaSupergroup(): List<TdApi.Chat> {
+                val semuaChatId = linkedSetOf<Long>()
+                var putaran = 0
+                while (putaran < 50) {
+                    putaran++
+                    val adaLagi = try {
+                        kirim(
+                            TdApi.LoadChats().apply {
+                                chatList = TdApi.ChatListMain()
+                                limit = 100
+                            },
+                        )
+                        true
+                    } catch (e: Exception) {
+                        // TDLib melempar 404 ketika seluruh obrolan sudah termuat
+                        false
+                    }
+
+                    val batch = try {
+                        kirim(
+                            TdApi.GetChats().apply {
+                                chatList = TdApi.ChatListMain()
+                                limit = 100
+                            },
+                        )
+                    } catch (e: Exception) {
+                        null
+                    }
+
+                    if (batch == null || batch.chatIds.isEmpty()) {
+                        if (!adaLagi) break
+                    } else {
+                        val sebelum = semuaChatId.size
+                        semuaChatId.addAll(batch.chatIds.toList())
+                        if (semuaChatId.size == sebelum && !adaLagi) break
+                    }
+
+                    if (!adaLagi) break
+                }
+
+                if (semuaChatId.isEmpty()) {
+                    val fallback = runCatching {
+                        kirim(
+                            TdApi.GetChats().apply {
+                                chatList = TdApi.ChatListMain()
+                                limit = 100
+                            },
+                        )
+                    }.getOrNull()
+                    if (fallback != null) {
+                        semuaChatId.addAll(fallback.chatIds.toList())
+                    }
+                }
+        return semuaChatId
+            .mapNotNull { id ->
+                try {
+                    kirim(TdApi.GetChat().apply { chatId = id })
+                } catch (e: Exception) {
+                    Log.w(tag, "Gagal memuat chat $id", e)
+                    null
+                }
+            }
+            .filter { layakDeteksiVault(it) }
     }
 
     /**

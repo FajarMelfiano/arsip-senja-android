@@ -69,6 +69,10 @@ class ArsipSenjaApp : Application(), Configuration.Provider {
         }
         // Mesin realtime: ingest pesan baru otomatis selama aplikasi hidup.
         wadah.arsipRepository.mulaiRealtime()
+        // Paket A2: cek kesehatan vault berkala (±6 jam).
+        wadah.arsipRepository.jadwalkanCekVaultBerkala()
+        // Paket B1: terapkan ulang operasi yang tertunda dari sesi sebelumnya.
+        wadah.arsipRepository.jadwalkanUlangSisaOperasi()
     }
 
     companion object {
