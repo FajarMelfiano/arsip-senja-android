@@ -207,4 +207,19 @@ object PenjagaVault {
         "Telegram membuat $tipe, bukan grup, sehingga tidak bisa dipakai " +
             "sebagai vault. Coba lagi, atau buat grup secara manual di " +
             "Telegram lalu pilih di \"Pilih grup lama\"."
+
+    /**
+     * True bila vault TIDAK BISA diperbaiki dan satu-satunya jalan jujur
+     * adalah menggantinya: masalah menyebut vault bukan grup/supergroup
+     * (mis. channel lama). Dalam kasus ini tombol "Perbaiki" menyesatkan —
+     * UI harus menampilkan "Ganti Vault" sebagai gantinya.
+     *
+     * Deteksi berdasarkan penanda dari [pesanVaultBukanSupergroup]:
+     * frasa "bukan grup" hanya muncul di pesan itu, tidak di teks TDLib.
+     */
+    fun butuhGantiBukanPerbaiki(masalah: String?): Boolean {
+        if (masalah.isNullOrBlank()) return false
+        return masalah.contains("bukan grup", ignoreCase = true) ||
+            masalah.contains("bukan supergroup", ignoreCase = true)
+    }
 }

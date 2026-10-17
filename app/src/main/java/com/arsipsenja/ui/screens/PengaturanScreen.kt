@@ -46,9 +46,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.arsipsenja.BuildConfig
+import com.arsipsenja.data.local.LogKonflikEntity
 import com.arsipsenja.data.repo.ArsipRepository
 import com.arsipsenja.data.repo.GrupDuplikat
 import com.arsipsenja.data.repo.KandidatVault
+import com.arsipsenja.data.repo.PenjagaVault
+import com.arsipsenja.data.repo.PeranPenggunaChat
 import com.arsipsenja.data.telegram.StatusOtorisasi
 import com.arsipsenja.ui.components.ChipArsip
 import com.arsipsenja.ui.components.KolomIsian
@@ -58,6 +61,7 @@ import com.arsipsenja.ui.components.TombolCadangan
 import com.arsipsenja.ui.components.TombolUtama
 import com.arsipsenja.ui.components.formatJam
 import com.arsipsenja.ui.icons.ArsipIcons
+import com.arsipsenja.util.formatRelatif
 import com.arsipsenja.ui.theme.Fraunces
 import com.arsipsenja.ui.theme.WarnaArsip
 import com.arsipsenja.ui.viewmodel.PengaturanViewModel
@@ -108,6 +112,12 @@ fun PengaturanScreen() {
     val galatKandidat by vm.galatKandidat.collectAsState()
     val memuatVault by vm.memuatVault.collectAsState()
     val pesanVault by vm.pesanVault.collectAsState()
+    val wizardVault by vm.wizard.collectAsState()
+    val kesehatanVault by vm.kesehatanVault.collectAsState()
+    val operasiTertunda by vm.operasiTertunda.collectAsState()
+    val logKonflik by vm.logKonflik.collectAsState()
+    val jedaBaterai by vm.jedaBaterai.collectAsState()
+    val jedaSeluler by vm.jedaSeluler.collectAsState()
     val infoVault by vm.infoVault.collectAsState()
     val statusRealtime by vm.statusRealtime.collectAsState()
     val daftarDuplikat by vm.daftarDuplikat.collectAsState()
@@ -266,7 +276,26 @@ fun PengaturanScreen() {
                 },
                 modifier = Modifier.weight(1f),
             )
-            if (adaVault && !siap) {
+            // A3: vault bertipe salah (channel / bukan grup) TIDAK bisa
+            // diperbaiki — satu-satunya jalan yang jujur adalah ganti vault
+            // baru atau putuskan pilihan yang sekarang.
+            val butuhGanti = PenjagaVault.butuhGantiBukanPerbaiki(infoVault?.masalah)
+            if (adaVault && !siap && butuhGanti) {
+                TextButton(onClick = vm::mulaiWizardVault, enabled = !memuatVault) {
+                    Text(
+                        text = "Ganti Vault",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = WarnaArsip.Amber,
+                    )
+                }
+                TextButton(onClick = vm::putuskanVault, enabled = !memuatVault) {
+                    Text(
+                        text = "Putuskan",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = WarnaArsip.Tinta2,
+                    )
+                }
+            } else if (adaVault && !siap) {
                 TextButton(onClick = vm::perbaikiVault, enabled = !memuatVault) {
                     Text(
                         text = "Perbaiki",
@@ -275,6 +304,23 @@ fun PengaturanScreen() {
                     )
                 }
             }
+        }
+        // A2: kesegaran hasil cek kesehatan berkala (worker tiap ±6 jam).
+        val (sehatTerakhir, dicekPada, masalahTerakhir) = kesehatanVault
+        if (adaVault) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = when {
+                    dicekPada == null || dicekPada == 0L ->
+                        "Kesehatan vault: belum pernah dicek otomatis."
+                    sehatTerakhir == true ->
+                        "Sehat • dicek ${formatRelatif(dicekPada)}."
+                    else ->
+                        "Bermasalah: ${masalahTerakhir ?: "periksa lagi nanti."}"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (sehatTerakhir == false) WarnaArsip.Bahaya else WarnaArsip.Tinta3,
+            )
         }
         if (infoVault?.masalah != null && adaVault && !siap) {
             Spacer(Modifier.height(4.dp))
@@ -292,6 +338,12 @@ fun PengaturanScreen() {
             color = WarnaArsip.Tinta3,
         )
         Spacer(Modifier.height(10.dp))
+        TombolUtama(
+            teks = "Siapkan Vault Otomatis",
+            ikon = ArsipIcons.RefreshCw,
+            onClick = vm::mulaiWizardVault,
+        )
+        Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TombolCadangan(
                 teks = "Pilih grup lama",
@@ -310,6 +362,56 @@ fun PengaturanScreen() {
                 modifier = Modifier.weight(1f),
                 penuh = false,
             )
+        }
+        Spacer(Modifier.height(24.dp))
+
+        // ---- Sinkronisasi (Paket B) ----
+        JudulBagian("Sinkronisasi")
+        Spacer(Modifier.height(10.dp))
+        BarisLabel(
+            label = "Menunggu sinkron",
+            nilai = if (operasiTertunda > 0) "$operasiTertunda operasi" else "Semua tersinkron",
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = "Perubahan yang belum terkirim ke Telegram disimpan dulu " +
+                "dan dicoba lagi otomatis saat koneksi tersedia.",
+            style = MaterialTheme.typography.bodySmall,
+            color = WarnaArsip.Tinta3,
+        )
+        Spacer(Modifier.height(10.dp))
+        BarisToggle(
+            label = "Jeda unggah saat baterai rendah",
+            keterangan = "Di bawah 15% — lanjut otomatis saat daya pulih.",
+            aktif = jedaBaterai,
+            onUbah = vm::setJedaBaterai,
+        )
+        Spacer(Modifier.height(8.dp))
+        BarisToggle(
+            label = "Jeda unggah saat data seluler",
+            keterangan = "Hanya unggah lewat Wi-Fi bila aktif.",
+            aktif = jedaSeluler,
+            onUbah = vm::setJedaSeluler,
+        )
+        Spacer(Modifier.height(12.dp))
+        Text(
+            text = "Log Konflik",
+            style = MaterialTheme.typography.titleSmall,
+            color = WarnaArsip.Tinta,
+        )
+        Spacer(Modifier.height(6.dp))
+        if (logKonflik.isEmpty()) {
+            Text(
+                text = "Belum ada konflik sinkron.",
+                style = MaterialTheme.typography.bodySmall,
+                color = WarnaArsip.Tinta3,
+            )
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                logKonflik.take(10).forEach { konflik ->
+                    BarisKonflik(konflik = konflik)
+                }
+            }
         }
         Spacer(Modifier.height(24.dp))
 
@@ -401,6 +503,18 @@ fun PengaturanScreen() {
         BarisLabel("Mesin", "TDLib (MTProto) — tanpa server perantara")
         BarisLabel("Penyimpanan", "Indeks lokal Room + channel Telegram")
         Spacer(Modifier.height(24.dp))
+    }
+
+    if (wizardVault.tampil) {
+        WizardVaultDialog(
+            status = wizardVault,
+            onNamaUbah = vm::setNamaGrupWizard,
+            onBuat = {
+                vm.cobaLagiLangkahWizard(PengaturanViewModel.LangkahWizard.BUAT)
+            },
+            onCobaLagi = vm::cobaLagiLangkahWizard,
+            onTutup = vm::tutupWizardVault,
+        )
     }
 
     if (dialogGrup) {
@@ -568,6 +682,78 @@ fun PengaturanScreen() {
 }
 
 @Composable
+private fun BarisToggle(
+    label: String,
+    keterangan: String,
+    aktif: Boolean,
+    onUbah: (Boolean) -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(WarnaArsip.Permukaan, RoundedCornerShape(10.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.titleSmall,
+                color = WarnaArsip.Tinta,
+            )
+            Text(
+                text = keterangan,
+                style = MaterialTheme.typography.bodySmall,
+                color = WarnaArsip.Tinta3,
+            )
+        }
+        Switch(
+            checked = aktif,
+            onCheckedChange = onUbah,
+            colors = SwitchDefaults.colors(
+                checkedTrackColor = WarnaArsip.Amber,
+                checkedThumbColor = WarnaArsip.Kanvas,
+                uncheckedTrackColor = WarnaArsip.Permukaan3,
+                uncheckedThumbColor = WarnaArsip.Tinta3,
+                uncheckedBorderColor = WarnaArsip.GarisKuat,
+            ),
+        )
+    }
+}
+
+/** Satu baris entri log konflik sinkron (Paket B2). */
+@Composable
+private fun BarisKonflik(konflik: LogKonflikEntity) {
+    Row(
+        verticalAlignment = Alignment.Top,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(WarnaArsip.Permukaan, RoundedCornerShape(10.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = konflik.targetId,
+                style = MaterialTheme.typography.bodyMedium,
+                color = WarnaArsip.Tinta,
+            )
+            Text(
+                text = (if (konflik.pemenang == "LOKAL") "Diterapkan dari perangkat ini"
+                else "Diterapkan dari perangkat lain") +
+                    " • " + formatRelatif(konflik.dicatatPada),
+                style = MaterialTheme.typography.bodySmall,
+                color = WarnaArsip.Tinta3,
+            )
+            Text(
+                text = konflik.alasan,
+                style = MaterialTheme.typography.bodySmall,
+                color = WarnaArsip.Tinta2,
+            )
+        }
+    }
+}
+
+@Composable
 private fun JudulBagian(teks: String) {
     Text(
         text = teks,
@@ -627,9 +813,9 @@ private fun DialogPilihGrup(
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = "Hanya grup yang kamu buat (kamu pemiliknya). " +
+                    text = "Hanya grup yang kamu miliki (pemilik atau admin). " +
                         "Grup yang belum mode forum akan diaktifkan otomatis " +
-                        "saat dipilih (butuh hak pemilik grup).",
+                        "saat dipilih.",
                     style = MaterialTheme.typography.bodySmall,
                     color = WarnaArsip.Tinta2,
                 )
@@ -678,12 +864,29 @@ private fun DialogPilihGrup(
                                     ),
                                 )
                                 Column(Modifier.weight(1f)) {
-                                    Text(
-                                        text = k.nama,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = WarnaArsip.Tinta,
-                                        maxLines = 1,
-                                    )
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = k.nama,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = WarnaArsip.Tinta,
+                                            maxLines = 1,
+                                            modifier = Modifier.weight(1f, fill = false),
+                                        )
+                                        // A4: lencana peran — hanya pemilik/admin
+                                        // yang lolos ke daftar ini.
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            text = if (k.peran == PeranPenggunaChat.ADMIN) "Admin" else "Pemilik",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = WarnaArsip.Amber,
+                                            modifier = Modifier
+                                                .background(
+                                                    WarnaArsip.Amber.copy(alpha = 0.14f),
+                                                    RoundedCornerShape(6.dp),
+                                                )
+                                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                                        )
+                                    }
                                     Text(
                                         text = if (k.forumSiap) "Forum siap"
                                         else "Forum akan diaktifkan",

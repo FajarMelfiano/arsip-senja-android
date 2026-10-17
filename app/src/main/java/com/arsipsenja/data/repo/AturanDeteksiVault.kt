@@ -8,6 +8,12 @@ data class KandidatVault(
     val nama: String,
     /** True bila grup sudah mode forum (topik bisa dipakai langsung). */
     val forumSiap: Boolean,
+    /**
+     * Peran pengguna di grup ini (Paket A4 — badge Pemilik/Admin).
+     * Default PEMILIK agar konstruksi lama (yang selalu owner-filtered)
+     * tetap kompilasi tanpa perubahan perilaku.
+     */
+    val peran: PeranPenggunaChat = PeranPenggunaChat.PEMILIK,
 )
 
 /**

@@ -202,9 +202,49 @@ val MIGRASI_7_8 = object : Migration(7, 8) {
     }
 }
 
+// Menambahkan tabel log operasi tertunda (sinkron tahan banting, Paket B1)
+// dan log konflik (resolusi sinkron dua arah, Paket B2).
+val MIGRASI_8_9 = object : Migration(8, 9) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `operasi_tertunda` (
+                `id` TEXT NOT NULL,
+                `jenis` TEXT NOT NULL,
+                `targetId` TEXT NOT NULL,
+                `payloadJson` TEXT NOT NULL,
+                `status` TEXT NOT NULL,
+                `dibuatPada` INTEGER NOT NULL,
+                `percobaan` INTEGER NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `log_konflik` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `targetId` TEXT NOT NULL,
+                `jenis` TEXT NOT NULL,
+                `pemenang` TEXT NOT NULL,
+                `alasan` TEXT NOT NULL,
+                `dicatatPada` INTEGER NOT NULL
+            )
+            """.trimIndent(),
+        )
+    }
+}
+
 @Database(
-    entities = [BerkasArsipEntity::class, KoleksiEntity::class, TautanEntity::class, UploadQueuePauseEntity::class],
-    version = 8,
+    entities = [
+        BerkasArsipEntity::class,
+        KoleksiEntity::class,
+        TautanEntity::class,
+        UploadQueuePauseEntity::class,
+        OperasiTertundaEntity::class,
+        LogKonflikEntity::class,
+    ],
+    version = 9,
     exportSchema = true,
 )
 abstract class ArsipDatabase : RoomDatabase() {
@@ -213,6 +253,8 @@ abstract class ArsipDatabase : RoomDatabase() {
     abstract fun koleksiDao(): KoleksiDao
     abstract fun tautanDao(): TautanDao
     abstract fun uploadQueuePauseDao(): UploadQueuePauseDao
+    abstract fun operasiTertundaDao(): OperasiTertundaDao
+    abstract fun logKonflikDao(): LogKonflikDao
 
     companion object {
         @Volatile
@@ -233,6 +275,7 @@ abstract class ArsipDatabase : RoomDatabase() {
                         MIGRASI_5_6,
                         MIGRASI_6_7,
                         MIGRASI_7_8,
+                        MIGRASI_8_9,
                     )
                     .build()
                     .also { instance = it }
